@@ -409,7 +409,7 @@ function loadSettings(){
 function saveSettingsToStorage(s){ localStorage.setItem(SETTINGS_KEY, JSON.stringify(s)); }
 
 let settings = Object.assign({
-  sheetId:'1RY-xUyIZ4c6ZWkLg4HHjElAOuuj5gUy3SnyijlROUDM', publishedUrl:'https://docs.google.com/spreadsheets/d/e/2PACX-1vRexCOYViGE7Jk8t95Yr7t_NaxZcyrZzguKD9hN6MBRHcONsneckfFMpOki6xYlHFE3Evx8CdbTZz_R/pub?gid=0&single=true&output=csv', tab:'Domestics MIS', gid:'0', interval:30, headerMode:'auto', 'DD-MM-YYYY':'DMY'
+  sheetId:'1RY-xUyIZ4c6ZWkLg4HHjElAOuuj5gUy3SnyijlROUDM', publishedUrl:'https://docs.google.com/spreadsheets/d/e/2PACX-1vRexCOYViGE7Jk8t95Yr7t_NaxZcyrZzguKD9hN6MBRHcONsneckfFMpOki6xYlHFE3Evx8CdbTZz_R/pub?gid=0&single=true&output=csv', tab:'Domestics MIS', gid:'0', interval:30, headerMode:'auto', dateFmt:'DMY'
 }, loadSettings());
 
 const panel = document.getElementById('settingsPanel');
@@ -432,7 +432,7 @@ document.getElementById('saveSettings').addEventListener('click', ()=>{
     gid: document.getElementById('cfgGid').value.trim(),
     interval: parseInt(document.getElementById('cfgInterval').value,10),
     headerMode: document.getElementById('cfgHeaderMode').value,
-    'DD-MM-YYYY': document.getElementById('cfgDateFmt').value
+    dateFmt: document.getElementById('cfgDateFmt').value
   };
   saveSettingsToStorage(settings);
   panel.classList.remove('open');
@@ -589,7 +589,7 @@ function findHeaderRowIndex(rows, mode){
   return 0;
 }
 
-function rowsToRecords(rows, 'DD-MM-YYYY', headerMode){
+function rowsToRecords(rows, dateFmt, headerMode){
   if(!rows.length) return [];
   const headerIdx = findHeaderRowIndex(rows, headerMode);
   const headerRow = rows[headerIdx];
@@ -607,10 +607,10 @@ function rowsToRecords(rows, 'DD-MM-YYYY', headerMode){
     Object.entries(colIndexToKey).forEach(([idx,key])=>{ rec[key] = row[idx]; });
     if(!rec.job || String(rec.job).trim()==='') continue;
 
-    const plannedEtd = parseDate(rec.planned_etd, 'DD-MM-YYYY');
-    const plannedEta = parseDate(rec.planned_eta, 'DD-MM-YYYY');
-    const actualEtd = parseDate(rec.actual_etd, 'DD-MM-YYYY');
-    const actualEta = parseDate(rec.actual_eta, 'DD-MM-YYYY');
+    const plannedEtd = parseDate(rec.planned_etd, dateFmt);
+    const plannedEta = parseDate(rec.planned_eta, dateFmt);
+    const actualEtd = parseDate(rec.actual_etd, dateFmt);
+    const actualEta = parseDate(rec.actual_eta, dateFmt);
     const etaDelay = daysBetween(plannedEta, actualEta);
     const month = plannedEtd ? plannedEtd.toLocaleString('en-US',{month:'short'}) + " - " + String(plannedEtd.getFullYear()).slice(2) : "";
 
@@ -653,12 +653,12 @@ function rowsToRecords(rows, 'DD-MM-YYYY', headerMode){
   return records;
 }
 
-function csvToRecords(csvText, 'DD-MM-YYYY', headerMode){
+function csvToRecords(csvText, dateFmt, headerMode){
   const parsed = Papa.parse(csvText.trim(), {skipEmptyLines:true});
-  return rowsToRecords(parsed.data, 'DD-MM-YYYY', headerMode);
+  return rowsToRecords(parsed.data, dateFmt, headerMode);
 }
 
-function xlsxToRecords(arrayBuffer, 'DD-MM-YYYY', headerMode, preferredSheetName){
+function xlsxToRecords(arrayBuffer, dateFmt, headerMode, preferredSheetName){
   const wb = XLSX.read(arrayBuffer, {type:'array', cellDates:true});
   let sheetName = wb.SheetNames[0];
   if(preferredSheetName && wb.SheetNames.includes(preferredSheetName)) sheetName = preferredSheetName;
@@ -671,7 +671,7 @@ function xlsxToRecords(arrayBuffer, 'DD-MM-YYYY', headerMode, preferredSheetName
   // means genuine date cells arrive as real JS Date objects, not text —
   // this avoids MM/DD vs DD/MM ambiguity entirely for Excel uploads.
   const rows = XLSX.utils.sheet_to_json(ws, {header:1, raw:true, defval:''});
-  return rowsToRecords(rows, 'DD-MM-YYYY', headerMode);
+  return rowsToRecords(rows, dateFmt, headerMode);
 }
 
 // ---------------------------------------------------------------
@@ -935,7 +935,7 @@ function renderUpcomingShipments(){
   const upcoming = allRecords
     .map(r => {
       const planned = r.planned_etd || '';
-      const plannedDate = parseDate(planned, settings.dateFmt || 'DD-MM-YYYY');
+      const plannedDate = parseDate(planned, settings.dateFmt || 'DMY');
       return {r, planned, plannedDate};
     })
     .filter(x => {
