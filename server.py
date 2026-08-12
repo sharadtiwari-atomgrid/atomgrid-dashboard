@@ -19,7 +19,9 @@ def add_no_cache_headers(response):
 def health():
     return jsonify(status='ok', service='atomgrid-dashboard')
 
-DEFAULT_PUBLISHED_CSV_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vRexCOYViGE7Jk8t95Yr7t_NaxZcyrZzguKD9hN6MBRHcONsneckfFMpOki6xYlHFE3Evx8CdbTZz_R/pub?gid=0&single=true&output=csv'\n\n@app.get('/api/sheet-csv')
+DEFAULT_PUBLISHED_CSV_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vRexCOYViGE7Jk8t95Yr7t_NaxZcyrZzguKD9hN6MBRHcONsneckfFMpOki6xYlHFE3Evx8CdbTZz_R/pub?gid=0&single=true&output=csv'
+
+@app.get('/api/sheet-csv')
 def sheet_csv():
     sheet_id = (request.args.get('sheet_id') or '').strip()
     gid = (request.args.get('gid') or '').strip()
