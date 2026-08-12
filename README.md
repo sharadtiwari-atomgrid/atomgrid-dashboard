@@ -52,3 +52,7 @@ Change a value in Google Sheets, wait for the next refresh, and the dashboard wi
 This is **polling**, not a Google push/webhook. The dashboard checks the public Google Sheet every 30 seconds by default. For a MIS dashboard this is usually the simplest and most reliable approach.
 
 Render's free web services can spin down after 15 minutes without incoming traffic. When a user opens the dashboard again, Render starts the service back up. For a dashboard that must stay continuously warm, use a paid instance. See Render's current service documentation for plan limitations.
+
+
+## Dashboard customization
+The Top Customers, Top Suppliers, AG Demand POC Load, and AG Supply POC Load charts have been removed as requested. Logistics Arrangement remains.

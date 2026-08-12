@@ -229,7 +229,7 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
   <div id="settingsPanel">
     <h3>Google Sheet — live connection</h3>
     <div class="hint" style="margin-top:0;margin-bottom:12px;">
-      This dashboard is configured for a public Google Sheet. It automatically checks the sheet every 30 seconds.
+      This dashboard is configured for a public Google Sheet. It automatically checks the sheet every 30 seconds. Payment Term and Payment Status are read from the corresponding sheet columns when present.
       You can change the interval below or use <strong>Refresh now</strong>.
     </div>
     <div class="row">
@@ -289,6 +289,8 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
     <div><label>AG Demand POC</label><select id="f-dpoc"><option value="">All POC</option></select></div>
     <div><label>Status</label><select id="f-status"><option value="">All status</option></select></div>
     <div><label>Logistics Type</label><select id="f-logi"><option value="">All types</option></select></div>
+    <div><label>Payment Term</label><select id="f-payment-term"><option value="">All payment terms</option></select></div>
+    <div><label>Payment Status</label><select id="f-payment-status"><option value="">All payment status</option></select></div>
     <button id="resetBtn" class="sans">Reset filters</button>
   </div>
 
@@ -313,32 +315,18 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
       <div class="chart-box tall"><canvas id="chartStatus"></canvas></div>
     </div>
   </div>
-
+</div>
   <div class="grid">
-    <div class="panel">
-      <h3>Top Customers by Shipment Count</h3>
-      <div class="chart-box tall"><canvas id="chartCustomers"></canvas></div>
-    </div>
-    <div class="panel">
-      <h3>Top Suppliers by Shipment Count</h3>
-      <div class="chart-box tall"><canvas id="chartSuppliers"></canvas></div>
-    </div>
-  </div>
-
-  <div class="grid3">
     <div class="panel">
       <h3>Logistics Arrangement</h3>
       <div class="chart-box short"><canvas id="chartLogi"></canvas></div>
     </div>
     <div class="panel">
-      <h3>AG Demand POC Load</h3>
-      <div class="chart-box short"><canvas id="chartDemandPoc"></canvas></div>
-    </div>
-    <div class="panel">
-      <h3>AG Supply POC Load</h3>
-      <div class="chart-box short"><canvas id="chartSupplyPoc"></canvas></div>
+      <h3>Payment Terms</h3>
+      <div class="chart-box short"><canvas id="chartPaymentTerm"></canvas></div>
     </div>
   </div>
+</div>
 
   <div class="grid">
     <div class="panel">
@@ -352,7 +340,7 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
   </div>
 
   <div class="panel table-panel">
-    <h3>Shipment Detail (filtered)</h3>
+    <h3>Shipment Detail & Payment Status (filtered)</h3>
     <div class="count-note" id="rowCount"></div>
     <div class="table-wrap">
       <table>
@@ -360,7 +348,7 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
           <tr>
             <th>Job No.</th><th>Customer</th><th>Supplier</th><th>Product</th><th>Qty (Kg)</th>
             <th>Planned ETD→ETA</th><th>Actual ETD→ETA</th><th>ETA Δ (d)</th>
-            <th>Status</th><th>Docs</th><th>Remark</th>
+            <th>Status</th><th>Total Logistics Cost</th><th>Logistics Cost (AG to Pay)</th><th>Logistics Payment Term</th><th>Payment Status</th><th>Docs</th><th>Remark</th>
           </tr>
         </thead>
         <tbody id="tableBody"></tbody>
@@ -368,7 +356,7 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
     </div>
   </div>
 
-  <footer>Upload your daily sheet export (Excel or CSV) to refresh · Last upload is remembered in this browser · Tax Invoice / E-Way Bill / COA / POD dots show presence, not content · build 2026-07-09c</footer>
+  <footer>Connected Google Sheet · Auto-refresh enabled · Tax Invoice / E-Way Bill / COA / POD dots show presence, not content · build 2026-07-09c</footer>
 </div>
 
 <script>
@@ -464,6 +452,12 @@ const COLUMN_MAP = {
   'logistics type': 'logistics_type',
   'transporter details': 'transporter',
   'logistics payment term': 'payment_term',
+  'logistics payment term ': 'payment_term',
+  'total logistics cost': 'total_logistics_cost',
+  'logistics cost (ag to pay)': 'logistics_cost_ag_to_pay',
+  'payment term': 'payment_term',
+  'payment status': 'payment_status',
+  'logistics payment status': 'payment_status',
   'tax invoice': 'tax_invoice_doc',
   'e-way bill': 'eway_doc',
   'coa': 'coa_doc',
@@ -575,6 +569,9 @@ function rowsToRecords(rows, dateFmt, headerMode){
       logistics_type: String(rec.logistics_type||'').trim(),
       transporter: String(rec.transporter||'').trim(),
       payment_term: String(rec.payment_term||'').trim(),
+      payment_status: String(rec.payment_status||'').trim(),
+      total_logistics_cost: rec.total_logistics_cost!==undefined ? String(rec.total_logistics_cost||'').trim() : '',
+      logistics_cost_ag_to_pay: rec.logistics_cost_ag_to_pay!==undefined ? String(rec.logistics_cost_ag_to_pay||'').trim() : '',
       has_tax_invoice: docPresent(rec.tax_invoice_doc),
       has_eway: docPresent(rec.eway_doc),
       has_coa: docPresent(rec.coa_doc),
@@ -763,6 +760,8 @@ function populateFilterOptions(){
   fillSelect('f-dpoc', uniqueSorted(allRecords.map(r=>r.demand_poc)));
   fillSelect('f-status', uniqueSorted(allRecords.map(r=>r.status)));
   fillSelect('f-logi', uniqueSorted(allRecords.map(r=>r.logistics_type)));
+  fillSelect('f-payment-term', uniqueSorted(allRecords.map(r=>r.payment_term)));
+  fillSelect('f-payment-status', uniqueSorted(allRecords.map(r=>r.payment_status)));
 }
 function fillSelect(id, values){
   const sel = document.getElementById(id);
@@ -771,11 +770,11 @@ function fillSelect(id, values){
   values.forEach(v=>{ const opt=document.createElement('option'); opt.value=v; opt.textContent=v; sel.appendChild(opt); });
   if(values.includes(current)) sel.value = current;
 }
-['f-month','f-customer','f-supplier','f-dpoc','f-status','f-logi'].forEach(id=>{
+['f-month','f-customer','f-supplier','f-dpoc','f-status','f-logi','f-payment-term','f-payment-status'].forEach(id=>{
   document.getElementById(id).addEventListener('change', applyFilters);
 });
 document.getElementById('resetBtn').addEventListener('click', ()=>{
-  ['f-month','f-customer','f-supplier','f-dpoc','f-status','f-logi'].forEach(id=>document.getElementById(id).value='');
+  ['f-month','f-customer','f-supplier','f-dpoc','f-status','f-logi','f-payment-term','f-payment-status'].forEach(id=>document.getElementById(id).value='');
   applyFilters();
 });
 
@@ -881,7 +880,7 @@ function renderOpsSnapshot(){
 function computeAgg(rows){
   const monthOrder = uniqueSorted(rows.map(r=>r.month));
   const byMonth = {}; monthOrder.forEach(m=>byMonth[m]={ship:0, etaOk:0, etaCnt:0, delaySum:0, delayCnt:0});
-  const byCust={}, bySupp={}, byStatus={}, byLogi={}, byDPoc={}, bySPoc={};
+  const byCust={}, bySupp={}, byStatus={}, byLogi={}, byDPoc={}, bySPoc={}, byPaymentTerm={}, byPaymentStatus={};
   let docYes={tax:0,eway:0,coa:0,pod:0};
   let flaggedRows=[];
 
@@ -898,6 +897,8 @@ function computeAgg(rows){
     if(r.supplier) bySupp[r.supplier] = (bySupp[r.supplier]||0)+1;
     if(r.status) byStatus[r.status] = (byStatus[r.status]||0)+1;
     if(r.logistics_type) byLogi[r.logistics_type] = (byLogi[r.logistics_type]||0)+1;
+    if(r.payment_term) byPaymentTerm[r.payment_term] = (byPaymentTerm[r.payment_term]||0)+1;
+    if(r.payment_status) byPaymentStatus[r.payment_status] = (byPaymentStatus[r.payment_status]||0)+1;
     if(r.demand_poc) byDPoc[r.demand_poc] = (byDPoc[r.demand_poc]||0)+1;
     if(r.supply_poc) bySPoc[r.supply_poc] = (bySPoc[r.supply_poc]||0)+1;
     if(r.has_tax_invoice) docYes.tax++;
@@ -916,7 +917,7 @@ function computeAgg(rows){
     }
   });
 
-  return {byMonth, byCust, bySupp, byStatus, byLogi, byDPoc, bySPoc, docYes, flaggedRows, monthOrder,
+  return {byMonth, byCust, bySupp, byStatus, byLogi, byDPoc, bySPoc, byPaymentTerm, byPaymentStatus, docYes, flaggedRows, monthOrder,
           count: rows.length,
           onTimePct: etaCntTotal ? (etaOkTotal/etaCntTotal*100) : null,
           avgDelay: delayCntTotal ? (delaySumTotal/delayCntTotal) : 0};
@@ -996,24 +997,6 @@ function renderCharts(agg){
     options:{responsive:true, maintainAspectRatio:false, plugins:{legend:{position:'bottom'}}}
   });
 
-  const topCust = topN(agg.byCust, 10);
-  charts.customers = new Chart(document.getElementById('chartCustomers'), {
-    type:'bar',
-    data:{labels: topCust.map(c=>c[0].length>22? c[0].slice(0,22)+'…':c[0]), datasets:[{label:'Shipments', data: topCust.map(c=>c[1]), backgroundColor: palette.navy2, borderRadius:4}]},
-    options:{indexAxis:'y', responsive:true, maintainAspectRatio:false,
-      scales:{x:{ticks:{precision:0}, grid:{color:'#EFEADB'}}, y:{grid:{display:false}}},
-      plugins:{legend:{display:false}}}
-  });
-
-  const topSupp = topN(agg.bySupp, 10);
-  charts.suppliers = new Chart(document.getElementById('chartSuppliers'), {
-    type:'bar',
-    data:{labels: topSupp.map(c=>c[0].length>22? c[0].slice(0,22)+'…':c[0]), datasets:[{label:'Shipments', data: topSupp.map(c=>c[1]), backgroundColor: palette.gold, borderRadius:4}]},
-    options:{indexAxis:'y', responsive:true, maintainAspectRatio:false,
-      scales:{x:{ticks:{precision:0}, grid:{color:'#EFEADB'}}, y:{grid:{display:false}}},
-      plugins:{legend:{display:false}}}
-  });
-
   const logiLabels = Object.keys(agg.byLogi);
   charts.logi = new Chart(document.getElementById('chartLogi'), {
     type:'pie',
@@ -1021,29 +1004,22 @@ function renderCharts(agg){
     options:{responsive:true, maintainAspectRatio:false, plugins:{legend:{position:'bottom', labels:{boxWidth:10, font:{size:10}}}}}
   });
 
-  const dpocSorted = topN(agg.byDPoc, 8);
-  charts.demandPoc = new Chart(document.getElementById('chartDemandPoc'), {
+  const paymentTermLabels = Object.keys(agg.byPaymentTerm).sort((a,b)=>agg.byPaymentTerm[b]-agg.byPaymentTerm[a]);
+  charts.paymentTerm = new Chart(document.getElementById('chartPaymentTerm'), {
     type:'bar',
-    data:{labels: dpocSorted.map(p=>p[0]), datasets:[{label:'Shipments', data: dpocSorted.map(p=>p[1]), backgroundColor: palette.rust, borderRadius:4}]},
-    options:{responsive:true, maintainAspectRatio:false, scales:{y:{beginAtZero:true, grid:{color:'#EFEADB'}}, x:{grid:{display:false}, ticks:{font:{size:10}}}}, plugins:{legend:{display:false}}}
-  });
-
-  const spocSorted = topN(agg.bySPoc, 8);
-  charts.supplyPoc = new Chart(document.getElementById('chartSupplyPoc'), {
-    type:'bar',
-    data:{labels: spocSorted.map(p=>p[0]), datasets:[{label:'Shipments', data: spocSorted.map(p=>p[1]), backgroundColor: palette.teal, borderRadius:4}]},
-    options:{responsive:true, maintainAspectRatio:false, scales:{y:{beginAtZero:true, grid:{color:'#EFEADB'}}, x:{grid:{display:false}, ticks:{font:{size:10}}}}, plugins:{legend:{display:false}}}
+    data:{labels: paymentTermLabels, datasets:[{label:'Shipments', data: paymentTermLabels.map(v=>agg.byPaymentTerm[v]), backgroundColor:palette.gold, borderRadius:5}]},
+    options:{indexAxis:'y', responsive:true, maintainAspectRatio:false, scales:{x:{beginAtZero:true, ticks:{precision:0}}, y:{grid:{display:false}}}, plugins:{legend:{display:false}}}
   });
 }
 
 function docDot(v){ return `<span class="doc-dot ${v?'dot-yes':'dot-no'}"></span>`; }
 
 function renderTable(rows){
-  document.getElementById('rowCount').textContent = rows.length + ' of ' + allRecords.length + ' shipments shown (max 200 rows rendered)';
+  document.getElementById('rowCount').textContent = rows.length + ' of ' + allRecords.length + ' shipments shown';
   const body = document.getElementById('tableBody');
-  const slice = rows.slice(0,200);
+  const slice = rows;
   if(!slice.length){
-    body.innerHTML = '<tr><td colspan="11" class="empty-state">No shipments match the current filters.</td></tr>';
+    body.innerHTML = '<tr><td colspan="13" class="empty-state">No shipments match the current filters.</td></tr>';
     return;
   }
   body.innerHTML = slice.map(r=>{
@@ -1054,7 +1030,11 @@ function renderTable(rows){
       <td>${r.planned_etd||'—'} → ${r.planned_eta||'—'}</td>
       <td>${r.actual_etd||'—'} → ${r.actual_eta||'—'}</td>
       <td>${delayTxt}</td>
-      <td><span class="status-pill ${cls}">${r.status}</span>${r.flagged?'<span class="flag-tag">flag</span>':''}</td>
+      <td><span class="status-pill ${cls}">${r.status||'—'}</span>${r.flagged?'<span class="flag-tag">flag</span>':''}</td>
+      <td>${r.total_logistics_cost||'—'}</td>
+      <td>${r.logistics_cost_ag_to_pay||'—'}</td>
+      <td>${r.payment_term||'—'}</td>
+      <td>${r.payment_status||'—'}</td>
       <td>${docDot(r.has_tax_invoice)}${docDot(r.has_eway)}${docDot(r.has_coa)}${docDot(r.has_pod)}</td>
       <td style="max-width:220px;">${r.remark||''}</td>
     </tr>`;
@@ -1068,9 +1048,12 @@ function applyFilters(){
   const dp = document.getElementById('f-dpoc').value;
   const st = document.getElementById('f-status').value;
   const lg = document.getElementById('f-logi').value;
+  const pt = document.getElementById('f-payment-term').value;
+  const ps = document.getElementById('f-payment-status').value;
   const rows = allRecords.filter(r =>
     (!m || r.month===m) && (!c || r.customer===c) && (!s || r.supplier===s) &&
-    (!dp || r.demand_poc===dp) && (!st || r.status===st) && (!lg || r.logistics_type===lg)
+    (!dp || r.demand_poc===dp) && (!st || r.status===st) && (!lg || r.logistics_type===lg) &&
+    (!pt || r.payment_term===pt) && (!ps || r.payment_status===ps)
   );
   const agg = computeAgg(rows);
   renderKpis(agg);
