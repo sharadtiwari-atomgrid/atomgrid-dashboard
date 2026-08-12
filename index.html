@@ -612,6 +612,7 @@ function rowsToRecords(rows, dateFmt, headerMode){
     const actualEtd = parseDate(rec.actual_etd, dateFmt);
     const actualEta = parseDate(rec.actual_eta, dateFmt);
     const etaDelay = daysBetween(plannedEta, actualEta);
+    const transitDays = daysBetween(actualEtd, actualEta);
     const month = plannedEtd ? plannedEtd.toLocaleString('en-US',{month:'short'}) + " - " + String(plannedEtd.getFullYear()).slice(2) : "";
 
     const remark = rec.remark || '';
@@ -629,6 +630,7 @@ function rowsToRecords(rows, dateFmt, headerMode){
       actual_etd: fmtDate(actualEtd),
       actual_eta: fmtDate(actualEta),
       eta_delay: etaDelay,
+      transit_days: transitDays,
       packing: String(rec.packing||'').trim(),
       supply_poc: String(rec.supply_poc||'').trim(),
       demand_poc: String(rec.demand_poc||'').trim(),
@@ -824,9 +826,24 @@ if(refreshNowBtn) refreshNowBtn.addEventListener('click', fetchAndRender);
 // ---------------------------------------------------------------
 function uniqueSorted(arr){ return [...new Set(arr)].filter(v=>v && v!=='nan').sort(); }
 
+// Months are labeled "MMM - YY" (e.g. "Apr - 26"). A plain string sort puts
+// these in alphabetical order (Apr, Aug, Jul, Jun, May...) instead of
+// chronological order. This parses the label back into a sortable key.
+const MONTH_ABBR_ORDER = {Jan:0,Feb:1,Mar:2,Apr:3,May:4,Jun:5,Jul:6,Aug:7,Sep:8,Oct:9,Nov:10,Dec:11};
+function monthLabelSortKey(label){
+  const m = String(label).match(/^([A-Za-z]{3})\s*-\s*(\d{2,4})$/);
+  if(!m) return Number.POSITIVE_INFINITY;
+  const monthIdx = MONTH_ABBR_ORDER[m[1]];
+  const year = m[2].length === 2 ? 2000 + (+m[2]) : +m[2];
+  return year * 12 + (monthIdx === undefined ? 0 : monthIdx);
+}
+function uniqueSortedMonths(arr){
+  return [...new Set(arr)].filter(v=>v && v!=='nan').sort((a,b)=>monthLabelSortKey(a)-monthLabelSortKey(b));
+}
+
 let filtersPopulated = false;
 function populateFilterOptions(){
-  const monthOrder = uniqueSorted(allRecords.map(r=>r.month));
+  const monthOrder = uniqueSortedMonths(allRecords.map(r=>r.month));
   fillSelect('f-month', monthOrder);
   fillSelect('f-customer', uniqueSorted(allRecords.map(r=>r.customer)));
   fillSelect('f-supplier', uniqueSorted(allRecords.map(r=>r.supplier)));
@@ -1017,8 +1034,8 @@ function renderOpsSnapshot(){
 }
 
 function computeAgg(rows){
-  const monthOrder = uniqueSorted(rows.map(r=>r.month));
-  const byMonth = {}; monthOrder.forEach(m=>byMonth[m]={ship:0, etaOk:0, etaCnt:0, delaySum:0, delayCnt:0});
+  const monthOrder = uniqueSortedMonths(rows.map(r=>r.month));
+  const byMonth = {}; monthOrder.forEach(m=>byMonth[m]={ship:0, etaOk:0, etaCnt:0, delaySum:0, delayCnt:0, transitSum:0, transitCnt:0});
   const byCust={}, bySupp={}, byStatus={}, byLogi={}, byDPoc={}, bySPoc={}, byPaymentTerm={}, byPaymentStatus={};
   let docYes={tax:0,eway:0,coa:0,pod:0};
   let flaggedRows=[];
@@ -1030,6 +1047,10 @@ function computeAgg(rows){
         byMonth[r.month].etaCnt += 1;
         if(r.eta_delay<=0) byMonth[r.month].etaOk += 1;
         else { byMonth[r.month].delaySum += r.eta_delay; byMonth[r.month].delayCnt += 1; }
+      }
+      if(r.transit_days!==null && r.transit_days!==undefined){
+        byMonth[r.month].transitSum += r.transit_days;
+        byMonth[r.month].transitCnt += 1;
       }
     }
     if(r.customer) byCust[r.customer] = (byCust[r.customer]||0)+1;
@@ -1115,7 +1136,8 @@ function renderCharts(agg){
       datasets:[
         {type:'bar', label:'Shipments', data: monthOrder.map(m=>agg.byMonth[m].ship), backgroundColor:'#DEDACB', yAxisID:'y1', borderRadius:4},
         {type:'line', label:'On-Time %', data: monthOrder.map(m=>{const b=agg.byMonth[m]; return b.etaCnt? (b.etaOk/b.etaCnt*100):null;}), borderColor: palette.teal, backgroundColor: palette.teal, yAxisID:'y', tension:0.3, pointRadius:4},
-        {type:'line', label:'Avg Delay (d)', data: monthOrder.map(m=>{const b=agg.byMonth[m]; return b.delayCnt? (b.delaySum/b.delayCnt):0;}), borderColor: palette.danger, backgroundColor: palette.danger, yAxisID:'y2', tension:0.3, pointRadius:4, borderDash:[4,3]}
+        {type:'line', label:'Avg Delay (d)', data: monthOrder.map(m=>{const b=agg.byMonth[m]; return b.delayCnt? (b.delaySum/b.delayCnt):0;}), borderColor: palette.danger, backgroundColor: palette.danger, yAxisID:'y2', tension:0.3, pointRadius:4, borderDash:[4,3]},
+        {type:'line', label:'Avg Transit (d)', data: monthOrder.map(m=>{const b=agg.byMonth[m]; return b.transitCnt? (b.transitSum/b.transitCnt):null;}), borderColor: palette.navy2, backgroundColor: palette.navy2, yAxisID:'y2', tension:0.3, pointRadius:4, borderDash:[2,2]}
       ]
     },
     options:{responsive:true, maintainAspectRatio:false,
