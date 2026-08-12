@@ -409,7 +409,7 @@ function loadSettings(){
 function saveSettingsToStorage(s){ localStorage.setItem(SETTINGS_KEY, JSON.stringify(s)); }
 
 let settings = Object.assign({
-  sheetId:'1RY-xUyIZ4c6ZWkLg4HHjElAOuuj5gUy3SnyijlROUDM', publishedUrl:'https://docs.google.com/spreadsheets/d/e/2PACX-1vRexCOYViGE7Jk8t95Yr7t_NaxZcyrZzguKD9hN6MBRHcONsneckfFMpOki6xYlHFE3Evx8CdbTZz_R/pub?gid=0&single=true&output=csv', tab:'Domestics MIS', gid:'0', interval:30, headerMode:'auto', dateFmt:'DMY'
+  sheetId:'1RY-xUyIZ4c6ZWkLg4HHjElAOuuj5gUy3SnyijlROUDM', publishedUrl:'https://docs.google.com/spreadsheets/d/e/2PACX-1vRexCOYViGE7Jk8t95Yr7t_NaxZcyrZzguKD9hN6MBRHcONsneckfFMpOki6xYlHFE3Evx8CdbTZz_R/pub?gid=0&single=true&output=csv', tab:'Domestics MIS', gid:'0', interval:30, headerMode:'auto', dateFmt:'MDY'
 }, loadSettings());
 
 const panel = document.getElementById('settingsPanel');
@@ -420,7 +420,7 @@ document.getElementById('settingsBtn').addEventListener('click', ()=>{
   document.getElementById('cfgGid').value = settings.gid||'';
   document.getElementById('cfgInterval').value = String(settings.interval||60);
   document.getElementById('cfgHeaderMode').value = settings.headerMode||'auto';
-  document.getElementById('cfgDateFmt').value = settings.dateFmt||'DMY';
+  document.getElementById('cfgDateFmt').value = settings.dateFmt||'MDY';
   panel.classList.add('open');
 });
 document.getElementById('cancelSettings').addEventListener('click', ()=> panel.classList.remove('open'));
@@ -936,7 +936,7 @@ function renderUpcomingShipments(){
   const upcoming = allRecords
     .map(r => {
       const planned = r.planned_etd || '';
-      const plannedDate = parseDate(planned, settings.dateFmt || 'DMY');
+      const plannedDate = parseDate(planned, settings.dateFmt || 'MDY');
       if(plannedDate) plannedDate.setHours(0,0,0,0);
       return {r, planned, plannedDate};
     })
