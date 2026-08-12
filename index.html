@@ -926,24 +926,32 @@ function renderUpcomingShipments(){
   const count = document.getElementById('upcomingShipmentsCount');
   if(!body || !count) return;
 
-  const today = fmtDate(new Date());
+  // Upcoming = ONLY rows whose Status is "Dispatch Plan" and whose
+  // Planned ETD is TODAY or ANY FUTURE DATE.
+  // Example: if today is Aug 12, include Aug 12, 13, 14, 15, ... onward.
+  const now = new Date();
+  now.setHours(0,0,0,0);
+
   const upcoming = allRecords
     .map(r => {
-      const planned = r.planned_etd || r.planned_eta || '';
-      return {r, planned};
+      const planned = r.planned_etd || '';
+      const plannedDate = parseDate(planned, settings.dateFormat || dateFmt);
+      return {r, planned, plannedDate};
     })
     .filter(x => {
       const status = String(x.r.status || '').trim().toLowerCase();
-      if(!x.planned || x.planned < today) return false;
-      if(status === 'delivered' || status === 'cancelled' || status === 'canceled') return false;
-      return true;
+      if(status !== 'dispatch plan') return false;
+      if(!x.plannedDate) return false;
+      x.plannedDate.setHours(0,0,0,0);
+      return x.plannedDate.getTime() >= now.getTime();
     })
-    .sort((a,b) => String(a.planned).localeCompare(String(b.planned)) || String(a.r.job).localeCompare(String(b.r.job)));
+    .sort((a,b) => a.plannedDate - b.plannedDate ||
+      String(a.r.job).localeCompare(String(b.r.job)));
 
   count.textContent = upcoming.length + ' upcoming shipment' + (upcoming.length===1?'':'s');
 
   if(!upcoming.length){
-    body.innerHTML = '<tr><td colspan="10" class="empty-state">No upcoming shipments found.</td></tr>';
+    body.innerHTML = '<tr><td colspan="10" class="empty-state">No Dispatch Plan shipments scheduled for today or any future date.</td></tr>';
     return;
   }
 
@@ -966,7 +974,6 @@ function renderUpcomingShipments(){
     </tr>
   `).join('');
 }
-
 
 function renderOpsSnapshot(){
   if(!allRecords.length) return;
