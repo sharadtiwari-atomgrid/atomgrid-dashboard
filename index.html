@@ -305,9 +305,9 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
     <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;">
       <div>
         <h3 style="margin-bottom:4px;">Upcoming Shipments</h3>
-        <div class="count-note" id="upcomingShipmentsCount">Future planned shipments</div>
+        <div class="count-note" id="upcomingShipmentsCount">Future planned shipments + On Hold</div>
       </div>
-      <div class="count-note">Excludes Delivered / Cancelled</div>
+      <div class="count-note">Excludes Delivered / Cancelled / In Transit</div>
     </div>
     <div class="table-wrap" style="margin-top:10px;">
       <table>
@@ -926,9 +926,10 @@ function renderUpcomingShipments(){
   const count = document.getElementById('upcomingShipmentsCount');
   if(!body || !count) return;
 
-  // Upcoming = ONLY rows whose Status is "Dispatch Plan" and whose
-  // Planned ETD is TODAY or ANY FUTURE DATE.
-  // Example: if today is Aug 12, include Aug 12, 13, 14, 15, ... onward.
+  // Upcoming = rows whose Status is "Dispatch Plan" with a Planned ETD of
+  // TODAY or any FUTURE date, PLUS all "On Hold" rows regardless of their
+  // Planned ETD (a held shipment is still pending dispatch whenever it's
+  // released, even if its original planned date has already passed).
   const now = new Date();
   now.setHours(0,0,0,0);
 
@@ -936,22 +937,32 @@ function renderUpcomingShipments(){
     .map(r => {
       const planned = r.planned_etd || '';
       const plannedDate = parseDate(planned, settings.dateFmt || 'DMY');
+      if(plannedDate) plannedDate.setHours(0,0,0,0);
       return {r, planned, plannedDate};
     })
     .filter(x => {
       const status = String(x.r.status || '').trim().toLowerCase();
-      if(status !== 'dispatch plan') return false;
-      if(!x.plannedDate) return false;
-      x.plannedDate.setHours(0,0,0,0);
-      return x.plannedDate.getTime() >= now.getTime();
+      if(status === 'dispatch plan'){
+        return !!x.plannedDate && x.plannedDate.getTime() >= now.getTime();
+      }
+      if(status === 'on hold'){
+        return true;
+      }
+      return false;
     })
-    .sort((a,b) => a.plannedDate - b.plannedDate ||
-      String(a.r.job).localeCompare(String(b.r.job)));
+    .sort((a,b) => {
+      // Rows with no usable planned date (common for On Hold shipments) sort last
+      if(!a.plannedDate && !b.plannedDate) return String(a.r.job).localeCompare(String(b.r.job));
+      if(!a.plannedDate) return 1;
+      if(!b.plannedDate) return -1;
+      return a.plannedDate - b.plannedDate ||
+        String(a.r.job).localeCompare(String(b.r.job));
+    });
 
-  count.textContent = upcoming.length + ' upcoming shipment' + (upcoming.length===1?'':'s');
+  count.textContent = upcoming.length + ' upcoming shipment' + (upcoming.length===1?'':'s') + ' (Dispatch Plan + On Hold)';
 
   if(!upcoming.length){
-    body.innerHTML = '<tr><td colspan="10" class="empty-state">No Dispatch Plan shipments scheduled for today or any future date.</td></tr>';
+    body.innerHTML = '<tr><td colspan="10" class="empty-state">No Dispatch Plan shipments scheduled for today/future, and no On Hold shipments found.</td></tr>';
     return;
   }
 
