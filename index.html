@@ -238,6 +238,10 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
         <input id="cfgSheetId" placeholder="from the sheet URL: /d/&lt;THIS PART&gt;/edit">
       </div>
       <div class="field">
+        <label>Published Google Sheet CSV URL</label>
+        <input id="cfgPublishedUrl" placeholder="https://docs.google.com/spreadsheets/d/e/.../pub?output=csv">
+      </div>
+      <div class="field">
         <label>Tab name (sheet name)</label>
         <input id="cfgTab" placeholder="Domestics MIS" value="Domestics MIS">
       </div>
@@ -274,7 +278,7 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
       </div>
     </div>
     <div class="hint">
-      In Google Sheets: <strong>File → Share → Publish to web</strong>, publish the "Domestics MIS" tab. The Sheet ID is the long string in your sheet's URL between <code>/d/</code> and <code>/edit</code>. Leave GID blank if you're using the tab name — it's only needed if the tab name has issues.
+      In Google Sheets: <strong>File → Share → Publish to web</strong>, publish the "Domestics MIS" tab. For reliable live access, use the <strong>Published Google Sheet CSV URL</strong> from File → Share → Publish to web. The published URL ends in <code>/pubhtml</code>. GID identifies the published tab.
     </div>
     <div class="actions">
       <button id="saveSettings">Save &amp; connect</button>
@@ -381,12 +385,13 @@ function loadSettings(){
 function saveSettingsToStorage(s){ localStorage.setItem(SETTINGS_KEY, JSON.stringify(s)); }
 
 let settings = Object.assign({
-  sheetId:'', tab:'Domestics MIS', gid:'', interval:30, headerMode:'auto', dateFmt:'MDY'
+  sheetId:'1RY-xUyIZ4c6ZWkLg4HHjElAOuuj5gUy3SnyijlROUDM', publishedUrl:'https://docs.google.com/spreadsheets/d/e/2PACX-1vRexCOYViGE7Jk8t95Yr7t_NaxZcyrZzguKD9hN6MBRHcONsneckfFMpOki6xYlHFE3Evx8CdbTZz_R/pub?gid=0&single=true&output=csv', tab:'Domestics MIS', gid:'0', interval:30, headerMode:'auto', dateFmt:'MDY'
 }, loadSettings());
 
 const panel = document.getElementById('settingsPanel');
 document.getElementById('settingsBtn').addEventListener('click', ()=>{
   document.getElementById('cfgSheetId').value = settings.sheetId||'';
+  document.getElementById('cfgPublishedUrl').value = settings.publishedUrl||'';
   document.getElementById('cfgTab').value = settings.tab||'Domestics MIS';
   document.getElementById('cfgGid').value = settings.gid||'';
   document.getElementById('cfgInterval').value = String(settings.interval||60);
@@ -398,6 +403,7 @@ document.getElementById('cancelSettings').addEventListener('click', ()=> panel.c
 document.getElementById('saveSettings').addEventListener('click', ()=>{
   settings = {
     sheetId: document.getElementById('cfgSheetId').value.trim(),
+    publishedUrl: document.getElementById('cfgPublishedUrl').value.trim(),
     tab: document.getElementById('cfgTab').value.trim(),
     gid: document.getElementById('cfgGid').value.trim(),
     interval: parseInt(document.getElementById('cfgInterval').value,10),
@@ -708,6 +714,7 @@ async function fetchAndRender(){
   setupBanner.style.display = 'none';
   setStatus('idle','Refreshing…');
   const params = new URLSearchParams({sheet_id: settings.sheetId});
+  if(settings.publishedUrl) params.set('published_url', settings.publishedUrl);
   if(settings.gid) params.set('gid', settings.gid);
   else if(settings.tab) params.set('tab', settings.tab);
 
