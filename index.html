@@ -213,6 +213,29 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
   .detail-item{padding:7px 0;border-bottom:1px solid #F0EDE5;}
   .detail-item b{display:block;color:var(--muted);font-size:10px;text-transform:uppercase;letter-spacing:.3px;margin-bottom:2px;}
   .detail-close{border:1px solid var(--line);background:#F3F1EA;border-radius:6px;padding:6px 10px;cursor:pointer;color:var(--navy);}
+  .transit-control{margin-bottom:18px;}
+  .transit-kpis{display:grid;grid-template-columns:repeat(5,1fr);gap:10px;margin-bottom:12px;}
+  .transit-kpi{background:#FAF8F2;border:1px solid var(--line);border-radius:8px;padding:10px 12px;cursor:pointer;transition:.15s;}
+  .transit-kpi:hover{transform:translateY(-1px);box-shadow:0 3px 10px rgba(22,35,59,.07);}
+  .transit-kpi .tk-label{font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.35px;}
+  .transit-kpi .tk-value{font-size:20px;font-weight:700;color:var(--navy);margin-top:3px;}
+  .transit-kpi .tk-sub{font-size:10px;color:var(--muted);margin-top:2px;}
+  .transit-tools{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin:4px 0 9px;}
+  .transit-tabs{display:flex;gap:6px;flex-wrap:wrap;}
+  .transit-tab{border:1px solid var(--line);background:#fff;border-radius:14px;padding:5px 10px;font-size:10.5px;color:var(--navy);cursor:pointer;}
+  .transit-tab.active{background:var(--navy);color:#fff;border-color:var(--navy);}
+  .transit-note{font-size:10.5px;color:var(--muted);}
+  .transit-table-wrap{max-height:300px;overflow:auto;border:1px solid var(--line);border-radius:6px;}
+  .transit-table td,.transit-table th{white-space:nowrap;}
+  .eta-pill{display:inline-block;padding:2px 7px;border-radius:12px;font-size:10px;font-weight:700;}
+  .eta-overdue{background:#F2E0DE;color:var(--danger);}
+  .eta-today{background:#F4EBD9;color:#9A6D16;}
+  .eta-next{background:#E1EEE9;color:var(--teal);}
+  .eta-later{background:#E7E9EE;color:var(--navy);}
+  .eta-na{background:#F3F1EA;color:var(--muted);}
+  .transit-delay{font-weight:700;color:var(--danger);}
+  @media(max-width:900px){.transit-kpis{grid-template-columns:repeat(2,1fr);}}
+
   tbody tr{cursor:pointer;}
   @media(max-width:700px){.detail-grid{grid-template-columns:1fr}.quick-search input{min-width:0}}
   @media(max-width:980px){ .kpis{grid-template-columns:repeat(2,1fr);} .grid,.grid3{grid-template-columns:1fr;} }
@@ -352,6 +375,34 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
     </div>
     <div class="snapshot-body" id="snapshotBody"></div>
   </div>
+
+
+  <section class="panel transit-control" id="inTransitControl">
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;">
+      <div>
+        <h3 style="margin-bottom:3px;">In-Transit Control Tower</h3>
+        <div class="count-note" id="transitControlNote">Live view of shipments currently on the road</div>
+      </div>
+      <button type="button" class="secondary" id="transitViewAll" style="border:1px solid var(--line);border-radius:6px;padding:6px 10px;cursor:pointer;">View all in transit</button>
+    </div>
+    <div class="transit-kpis" id="transitKpis"></div>
+    <div class="transit-tools">
+      <div class="transit-tabs" id="transitTabs">
+        <button type="button" class="transit-tab active" data-transit-filter="all">All</button>
+        <button type="button" class="transit-tab" data-transit-filter="overdue">Overdue</button>
+        <button type="button" class="transit-tab" data-transit-filter="today">ETA Today</button>
+        <button type="button" class="transit-tab" data-transit-filter="next3">Next 3 Days</button>
+        <button type="button" class="transit-tab" data-transit-filter="delayed">Delayed</button>
+      </div>
+      <div class="transit-note" id="transitCountNote"></div>
+    </div>
+    <div class="transit-table-wrap">
+      <table class="transit-table">
+        <thead><tr><th>Job</th><th>Customer</th><th>PoC</th><th>Actual ETD</th><th>Expected ETA</th><th>ETA Status</th><th>Delay</th><th>Transit</th><th>Transporter</th></tr></thead>
+        <tbody id="transitControlBody"></tbody>
+      </table>
+    </div>
+  </section>
 
   <div class="grid3">
     <div class="panel">
@@ -1344,22 +1395,69 @@ function bindInteractiveControls(){
   document.getElementById('detailClose').addEventListener('click',()=>document.getElementById('detailOverlay').style.display='none');document.getElementById('detailOverlay').addEventListener('click',e=>{if(e.target.id==='detailOverlay')e.currentTarget.style.display='none';});document.addEventListener('keydown',e=>{if(e.key==='Escape')document.getElementById('detailOverlay').style.display='none';});
 }
 
-function applyFilters(){
-  const m = document.getElementById('f-month').value;
-  const c = document.getElementById('f-customer').value;
-  const s = document.getElementById('f-supplier').value;
-  const dp = document.getElementById('f-dpoc').value;
-  const st = document.getElementById('f-status').value;
-  const lg = document.getElementById('f-logi').value;
-  const pt = document.getElementById('f-payment-term').value;
-  const ps = document.getElementById('f-payment-status').value;
-  const q = String(document.getElementById('f-search').value || '').trim().toLowerCase();
-  const rows = allRecords.filter(r => {
-    const hay = [r.job,r.customer,r.supplier,r.product,r.demand_poc,r.supply_poc].map(v=>String(v||'').toLowerCase()).join(' ');
-    return (!m || r.month===m) && (!c || r.customer===c) && (!s || r.supplier===s) &&
-      (!dp || r.demand_poc===dp) && (!st || r.status===st) && (!lg || r.logistics_type===lg) &&
-      (!pt || r.payment_term===pt) && (!ps || r.payment_status===ps) && (!q || hay.includes(q));
+
+let activeTransitFilter='all';
+function renderTransitControl(rows){
+  const body=document.getElementById('transitControlBody');
+  const kpis=document.getElementById('transitKpis');
+  const note=document.getElementById('transitControlNote');
+  const countNote=document.getElementById('transitCountNote');
+  if(!body||!kpis)return;
+  const today=new Date(); today.setHours(0,0,0,0);
+  const isoToday=fmtDate(today);
+  const transit=rows.filter(r=>String(r.status||'').trim()==='In Transit');
+  const info=transit.map(r=>{
+    const eta=parseDate(r.actual_eta, settings.dateFmt||'DMY'); if(eta)eta.setHours(0,0,0,0);
+    const etd=parseDate(r.actual_etd, settings.dateFmt||'DMY'); if(etd)etd.setHours(0,0,0,0);
+    const delay=Number.isFinite(Number(r.eta_delay))?Number(r.eta_delay):null;
+    let bucket='na', label='ETA N/A', days=null;
+    if(eta){ days=Math.round((eta-today)/86400000); if(days<0){bucket='overdue';label=`Overdue ${Math.abs(days)}d`;} else if(days===0){bucket='today';label='ETA Today';} else if(days<=3){bucket='next3';label=`ETA +${days}d`;} else {bucket='later';label=`ETA +${days}d`;} }
+    return {r,eta,etd,delay,bucket,label};
   });
+  const overdue=info.filter(x=>x.bucket==='overdue').length;
+  const etaToday=info.filter(x=>x.bucket==='today').length;
+  const next3=info.filter(x=>x.bucket==='next3'||x.bucket==='today').length;
+  const delayed=info.filter(x=>x.delay!==null&&x.delay>0).length;
+  kpis.innerHTML=[
+    ['In Transit',info.length,'currently moving','all'],
+    ['ETA Today',etaToday,'expected today','today'],
+    ['Overdue',overdue,'ETA already passed','overdue'],
+    ['Next 3 Days',next3,'ETA today + next 3 days','next3'],
+    ['Delayed',delayed,'positive ETA delay','delayed']
+  ].map(([label,val,sub,key])=>`<div class="transit-kpi" data-transit-kpi="${key}"><div class="tk-label">${label}</div><div class="tk-value">${val}</div><div class="tk-sub">${sub}</div></div>`).join('');
+  let filtered=info;
+  if(activeTransitFilter==='overdue')filtered=info.filter(x=>x.bucket==='overdue');
+  if(activeTransitFilter==='today')filtered=info.filter(x=>x.bucket==='today');
+  if(activeTransitFilter==='next3')filtered=info.filter(x=>x.bucket==='today'||x.bucket==='next3');
+  if(activeTransitFilter==='delayed')filtered=info.filter(x=>x.delay!==null&&x.delay>0);
+  filtered.sort((a,b)=>{
+    const ta=a.eta?a.eta.getTime():Infinity, tb=b.eta?b.eta.getTime():Infinity;
+    return ta-tb || String(a.r.job).localeCompare(String(b.r.job));
+  });
+  countNote.textContent=`Showing ${filtered.length} of ${info.length} in-transit shipments`;
+  if(!filtered.length){body.innerHTML='<tr><td colspan="9" class="empty-state">No in-transit shipments match this view.</td></tr>';return;}
+  const safe=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  body.innerHTML=filtered.slice(0,150).map(x=>{
+    const r=x.r; const pill=`<span class="eta-pill eta-${x.bucket}">${safe(x.label)}</span>`;
+    const delay=x.delay!==null?(x.delay>0?`<span class="transit-delay">+${x.delay}d</span>`:`${x.delay}d`):'—';
+    return `<tr data-transit-job="${safe(r.job)}" style="cursor:pointer"><td><b>${safe(r.job)}</b></td><td>${safe(r.customer||'—')}</td><td>${safe(r.logistics_poc||'—')}</td><td>${safe(r.actual_etd||'—')}</td><td>${safe(r.actual_eta||'—')}</td><td>${pill}</td><td>${delay}</td><td>${safe(r.transit_time||'—')}</td><td>${safe(r.transporter||'—')}</td></tr>`;
+  }).join('');
+  body.querySelectorAll('tr[data-transit-job]').forEach(tr=>tr.addEventListener('click',()=>openShipmentDetail(tr.dataset.transitJob)));
+  document.querySelectorAll('.transit-tab').forEach(b=>b.classList.toggle('active',b.dataset.transitFilter===activeTransitFilter));
+  document.querySelectorAll('.transit-kpi').forEach(b=>b.onclick=()=>{activeTransitFilter=b.dataset.transitKpi;renderTransitControl(rows);});
+  note.textContent=`${info.length} shipment${info.length===1?'':'s'} currently in transit · updated with the current dashboard data`;
+}
+function bindTransitControls(){
+  document.querySelectorAll('.transit-tab').forEach(b=>b.addEventListener('click',()=>{activeTransitFilter=b.dataset.transitFilter;renderTransitControl(getFilteredRowsForDashboard());}));
+  document.getElementById('transitViewAll')?.addEventListener('click',()=>{setFilter('f-status','In Transit');window.scrollTo({top:document.getElementById('inTransitControl').offsetTop-12,behavior:'smooth'});});
+}
+function getFilteredRowsForDashboard(){
+  const m=document.getElementById('f-month').value,c=document.getElementById('f-customer').value,s=document.getElementById('f-supplier').value,dp=document.getElementById('f-dpoc').value,st=document.getElementById('f-status').value,lg=document.getElementById('f-logi').value,pt=document.getElementById('f-payment-term').value,ps=document.getElementById('f-payment-status').value,q=String(document.getElementById('f-search').value||'').trim().toLowerCase();
+  return allRecords.filter(r=>{const hay=[r.job,r.customer,r.supplier,r.product,r.demand_poc,r.supply_poc].map(v=>String(v||'').toLowerCase()).join(' ');return(!m||r.month===m)&&(!c||r.customer===c)&&(!s||r.supplier===s)&&(!dp||r.demand_poc===dp)&&(!st||r.status===st)&&(!lg||r.logistics_type===lg)&&(!pt||r.payment_term===pt)&&(!ps||r.payment_status===ps)&&(!q||hay.includes(q));});
+}
+
+function applyFilters(){
+  const rows = getFilteredRowsForDashboard();
   const agg = computeAgg(rows);
   renderKpis(agg);
   renderDocBars(agg);
@@ -1367,12 +1465,15 @@ function applyFilters(){
   renderCharts(agg);
   attachChartInteractions(agg.monthOrder.filter(m=>agg.byMonth[m] && agg.byMonth[m].ship>0));
   renderTable(rows);
+  renderTransitControl(rows);
   updateActiveFilterBar();
   document.querySelectorAll('#tableBody tr[data-job]').forEach(tr=>tr.addEventListener('click',()=>openShipmentDetail(tr.dataset.job)));
 }
 
+
 // ---------------------------------------------------------------
 bindInteractiveControls();
+bindTransitControls();
 
 // Boot
 // ---------------------------------------------------------------
