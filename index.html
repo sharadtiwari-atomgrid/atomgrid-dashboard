@@ -148,7 +148,9 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
   .panel h3{margin:0 0 8px;font-size:13px;font-family:'Helvetica Neue',Arial,sans-serif;letter-spacing:0.3px;color:var(--navy);border-bottom:1px solid var(--line);padding-bottom:8px;}
   .chart-box{position:relative;height:190px;}
   .chart-box.tall{height:220px;}
-  .chart-box.short{height:165px;}
+  .chart-box.short{height:120px;}
+  .payment-panel{max-width:760px;}
+  .payment-panel .chart-box{height:120px;}
 
   /* Daily Ops Snapshot — mirrors the reference report layout */
   .snapshot-panel{background:var(--card);border:1px solid var(--line);border-radius:10px;overflow:hidden;margin-bottom:26px;font-family:'Helvetica Neue',Arial,sans-serif;}
@@ -224,7 +226,7 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
   .transit-tabs{display:flex;gap:6px;flex-wrap:wrap;}
   .transit-tab{border:1px solid var(--line);background:#fff;border-radius:14px;padding:5px 10px;font-size:10.5px;color:var(--navy);cursor:pointer;}
   .transit-tab.active{background:var(--navy);color:#fff;border-color:var(--navy);}
-  .transit-note{font-size:10.5px;color:var(--muted);}
+  .transit-note{font-size:10.5px;color:var(--muted);}.transit-logic{font-size:10px;color:var(--muted);background:#F8F6EF;border:1px solid var(--line);border-radius:6px;padding:7px 9px;margin:0 0 9px;line-height:1.45}.transit-logic b{color:var(--navy)}
   .transit-table-wrap{max-height:300px;overflow:auto;border:1px solid var(--line);border-radius:6px;}
   .transit-table td,.transit-table th{white-space:nowrap;}
   .eta-pill{display:inline-block;padding:2px 7px;border-radius:12px;font-size:10px;font-weight:700;}
@@ -386,19 +388,20 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
       <button type="button" class="secondary" id="transitViewAll" style="border:1px solid var(--line);border-radius:6px;padding:6px 10px;cursor:pointer;">View all in transit</button>
     </div>
     <div class="transit-kpis" id="transitKpis"></div>
+    <div class="transit-logic"><b>How the control tower works:</b> Overdue = shipment should have reached already · ETA Today = reaching today · Next 3 Days = reaching in 1–3 days · Late vs Plan = expected arrival is later than planned ETA. <b>Negative variance means early/on plan, not delayed.</b></div>
     <div class="transit-tools">
       <div class="transit-tabs" id="transitTabs">
         <button type="button" class="transit-tab active" data-transit-filter="all">All</button>
         <button type="button" class="transit-tab" data-transit-filter="overdue">Overdue</button>
         <button type="button" class="transit-tab" data-transit-filter="today">ETA Today</button>
         <button type="button" class="transit-tab" data-transit-filter="next3">Next 3 Days</button>
-        <button type="button" class="transit-tab" data-transit-filter="delayed">Delayed</button>
+        <button type="button" class="transit-tab" data-transit-filter="delayed">Late vs Plan</button>
       </div>
       <div class="transit-note" id="transitCountNote"></div>
     </div>
     <div class="transit-table-wrap">
       <table class="transit-table">
-        <thead><tr><th>Job</th><th>Customer</th><th>PoC</th><th>Actual ETD</th><th>Expected ETA</th><th>ETA Status</th><th>Delay</th><th>Transit</th><th>Transporter</th></tr></thead>
+        <thead><tr><th>Job</th><th>Customer</th><th>PoC</th><th>Actual ETD</th><th>Reaching In</th><th>ETA Status</th><th>ETA Variance</th><th>Transit</th><th>Transporter</th></tr></thead>
         <tbody id="transitControlBody"></tbody>
       </table>
     </div>
@@ -429,14 +432,12 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
       <div class="chart-box tall"><canvas id="chartLogi"></canvas></div>
     </div>
   </div>
-</div>
   <div class="grid">
-    <div class="panel">
+    <div class="panel payment-panel">
       <h3>Payment Terms</h3>
       <div class="chart-box short"><canvas id="chartPaymentTerm"></canvas></div>
     </div>
   </div>
-</div>
 
   <div class="grid">
     <div class="panel">
@@ -466,7 +467,7 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
     </div>
   </div>
 
-  <footer>Connected Google Sheet · Auto-refresh enabled · Tax Invoice / E-Way Bill / COA / POD dots show presence, not content · build 2026-07-09c-interactive</footer>
+  <footer>Connected Google Sheet · Auto-refresh enabled · Tax Invoice / E-Way Bill / COA / POD dots show presence, not content · build 2026-08-24-final</footer>
 </div>
 
 <div class="detail-overlay" id="detailOverlay" role="dialog" aria-modal="true" aria-labelledby="detailTitle">
@@ -1332,7 +1333,7 @@ function renderCharts(agg){
   charts.paymentTerm = new Chart(document.getElementById('chartPaymentTerm'), {
     type:'bar',
     data:{labels: paymentTermLabels, datasets:[{label:'Shipments', data: paymentTermLabels.map(v=>agg.byPaymentTerm[v]), backgroundColor:palette.gold, borderRadius:5}]},
-    options:{indexAxis:'y', responsive:true, maintainAspectRatio:false, scales:{x:{beginAtZero:true, ticks:{precision:0}}, y:{grid:{display:false}}}, plugins:{legend:{display:false}}}
+    options:{indexAxis:'y', responsive:true, maintainAspectRatio:false, layout:{padding:{left:4,right:8,top:2,bottom:2}}, scales:{x:{beginAtZero:true,ticks:{precision:0,font:{size:9}},grid:{color:'#E5E1D8'}},y:{grid:{display:false},ticks:{font:{size:10},padding:4}}}, plugins:{legend:{display:false},tooltip:{callbacks:{label:(ctx)=>` ${ctx.raw} shipments`}}}, interaction:{mode:'nearest',axis:'y',intersect:true}}
   });
 }
 
@@ -1411,24 +1412,25 @@ function renderTransitControl(rows){
     const etd=parseDate(r.actual_etd, settings.dateFmt||'DMY'); if(etd)etd.setHours(0,0,0,0);
     const delay=Number.isFinite(Number(r.eta_delay))?Number(r.eta_delay):null;
     let bucket='na', label='ETA N/A', days=null;
-    if(eta){ days=Math.round((eta-today)/86400000); if(days<0){bucket='overdue';label=`Overdue ${Math.abs(days)}d`;} else if(days===0){bucket='today';label='ETA Today';} else if(days<=3){bucket='next3';label=`ETA +${days}d`;} else {bucket='later';label=`ETA +${days}d`;} }
-    return {r,eta,etd,delay,bucket,label};
+    if(eta){ days=Math.round((eta-today)/86400000); if(days<0){bucket='overdue';label=`Overdue by ${Math.abs(days)}d`;} else if(days===0){bucket='today';label='Due Today';} else if(days<=3){bucket='next3';label=`Due in ${days}d`;} else {bucket='later';label=`Due in ${days}d`;} }
+    const varianceLabel = delay===null ? '—' : (delay>0 ? `Late +${delay}d` : delay<0 ? `Early ${Math.abs(delay)}d` : 'On plan');
+    return {r,eta,etd,delay,bucket,label,varianceLabel};
   });
   const overdue=info.filter(x=>x.bucket==='overdue').length;
   const etaToday=info.filter(x=>x.bucket==='today').length;
-  const next3=info.filter(x=>x.bucket==='next3'||x.bucket==='today').length;
+  const next3=info.filter(x=>x.bucket==='next3').length;
   const delayed=info.filter(x=>x.delay!==null&&x.delay>0).length;
   kpis.innerHTML=[
     ['In Transit',info.length,'currently moving','all'],
     ['ETA Today',etaToday,'expected today','today'],
     ['Overdue',overdue,'ETA already passed','overdue'],
-    ['Next 3 Days',next3,'ETA today + next 3 days','next3'],
-    ['Delayed',delayed,'positive ETA delay','delayed']
+    ['Next 3 Days',next3,'due in 1–3 days','next3'],
+    ['Late vs Plan',delayed,'expected ETA after planned ETA','delayed']
   ].map(([label,val,sub,key])=>`<div class="transit-kpi" data-transit-kpi="${key}"><div class="tk-label">${label}</div><div class="tk-value">${val}</div><div class="tk-sub">${sub}</div></div>`).join('');
   let filtered=info;
   if(activeTransitFilter==='overdue')filtered=info.filter(x=>x.bucket==='overdue');
   if(activeTransitFilter==='today')filtered=info.filter(x=>x.bucket==='today');
-  if(activeTransitFilter==='next3')filtered=info.filter(x=>x.bucket==='today'||x.bucket==='next3');
+  if(activeTransitFilter==='next3')filtered=info.filter(x=>x.bucket==='next3');
   if(activeTransitFilter==='delayed')filtered=info.filter(x=>x.delay!==null&&x.delay>0);
   filtered.sort((a,b)=>{
     const ta=a.eta?a.eta.getTime():Infinity, tb=b.eta?b.eta.getTime():Infinity;
@@ -1439,8 +1441,8 @@ function renderTransitControl(rows){
   const safe=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   body.innerHTML=filtered.slice(0,150).map(x=>{
     const r=x.r; const pill=`<span class="eta-pill eta-${x.bucket}">${safe(x.label)}</span>`;
-    const delay=x.delay!==null?(x.delay>0?`<span class="transit-delay">+${x.delay}d</span>`:`${x.delay}d`):'—';
-    return `<tr data-transit-job="${safe(r.job)}" style="cursor:pointer"><td><b>${safe(r.job)}</b></td><td>${safe(r.customer||'—')}</td><td>${safe(r.logistics_poc||'—')}</td><td>${safe(r.actual_etd||'—')}</td><td>${safe(r.actual_eta||'—')}</td><td>${pill}</td><td>${delay}</td><td>${safe(r.transit_time||'—')}</td><td>${safe(r.transporter||'—')}</td></tr>`;
+    const variance=x.delay!==null?(x.delay>0?`<span class="transit-delay">Late +${x.delay}d</span>`:x.delay<0?`<span style="color:var(--teal);font-weight:700">Early ${Math.abs(x.delay)}d</span>`:'On plan'):'—';
+    return `<tr data-transit-job="${safe(r.job)}" style="cursor:pointer"><td><b>${safe(r.job)}</b></td><td>${safe(r.customer||'—')}</td><td>${safe(r.logistics_poc||'—')}</td><td>${safe(r.actual_etd||'—')}</td><td>${pill}</td><td>${safe(x.label)}</td><td>${variance}</td><td>${safe(r.transit_time||'—')}</td><td>${safe(r.transporter||'—')}</td></tr>`;
   }).join('');
   body.querySelectorAll('tr[data-transit-job]').forEach(tr=>tr.addEventListener('click',()=>openShipmentDetail(tr.dataset.transitJob)));
   document.querySelectorAll('.transit-tab').forEach(b=>b.classList.toggle('active',b.dataset.transitFilter===activeTransitFilter));
