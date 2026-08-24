@@ -1039,7 +1039,7 @@ function renderOpsSnapshot(){
   // Pickup completion is based on the actual status transition into In Transit,
   // not on Actual/Tentative ETD. This prevents shipments merely planned for
   // today from appearing as Picked Today.
-  const pickedTodayRows = transitRows.filter(r => r.status_confirmed_date === todayIso);
+  const pickedTodayRows = transitRows.filter(r => r.actual_etd === todayIso);
 
   const pickupTable = buildTimelineTable(dispatchRows, 'logistics_poc', 'planned_etd', null, todayIso, 'Not Assigned', pickedTodayRows);
   const deliveryTable = buildTimelineTable(transitRows, 'logistics_poc', 'planned_eta', 'actual_eta', todayIso, 'ETA NA');
