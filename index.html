@@ -333,22 +333,33 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
     <div class="snapshot-body" id="snapshotBody"></div>
   </div>
 
-  <div class="grid">
+  <div class="grid3">
     <div class="panel">
-      <h3>On-Time ETA Performance by Month</h3>
+      <h3>On-Time ETA % by Month</h3>
       <div class="chart-box tall"><canvas id="chartOnTime"></canvas></div>
     </div>
+    <div class="panel">
+      <h3>Average Transit Time by Month</h3>
+      <div class="chart-box tall"><canvas id="chartAvgTransit"></canvas></div>
+    </div>
+    <div class="panel">
+      <h3>Average Delay by Month</h3>
+      <div class="chart-box tall"><canvas id="chartAvgDelay"></canvas></div>
+    </div>
+  </div>
+
+  <div class="grid">
     <div class="panel">
       <h3>Shipment Status</h3>
       <div class="chart-box tall"><canvas id="chartStatus"></canvas></div>
     </div>
+    <div class="panel">
+      <h3>Logistics Arrangement</h3>
+      <div class="chart-box tall"><canvas id="chartLogi"></canvas></div>
+    </div>
   </div>
 </div>
   <div class="grid">
-    <div class="panel">
-      <h3>Logistics Arrangement</h3>
-      <div class="chart-box short"><canvas id="chartLogi"></canvas></div>
-    </div>
     <div class="panel">
       <h3>Payment Terms</h3>
       <div class="chart-box short"><canvas id="chartPaymentTerm"></canvas></div>
@@ -473,8 +484,6 @@ const COLUMN_MAP = {
   'planned eta (fixed)': 'planned_eta',
   'actual/tentative etd': 'actual_etd',
   'actual/tentative eta': 'actual_eta',
-  'status confirmned date': 'status_confirmed_date',
-  'status confirmed date': 'status_confirmed_date',
   'packing': 'packing',
   'ag supply poc': 'supply_poc',
   'ag demand poc': 'demand_poc',
@@ -528,7 +537,7 @@ function parseDate(s, fmt){
     return null;
   }
 
-  m = s.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})(?:\s+\d{1,2}:\d{2}(?::\d{2})?)?$/);
+  m = s.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})$/);
   if(m){
     const a=+m[1], b=+m[2];
     let y=+m[3];
@@ -613,7 +622,6 @@ function rowsToRecords(rows, dateFmt, headerMode){
     const plannedEta = parseDate(rec.planned_eta, dateFmt);
     const actualEtd = parseDate(rec.actual_etd, dateFmt);
     const actualEta = parseDate(rec.actual_eta, dateFmt);
-    const statusConfirmedDate = parseDate(rec.status_confirmed_date, dateFmt);
     const etaDelay = daysBetween(plannedEta, actualEta);
     const transitDays = daysBetween(actualEtd, actualEta);
     const month = plannedEtd ? plannedEtd.toLocaleString('en-US',{month:'short'}) + " - " + String(plannedEtd.getFullYear()).slice(2) : "";
@@ -632,7 +640,6 @@ function rowsToRecords(rows, dateFmt, headerMode){
       planned_eta: fmtDate(plannedEta),
       actual_etd: fmtDate(actualEtd),
       actual_eta: fmtDate(actualEta),
-      status_confirmed_date: fmtDate(statusConfirmedDate),
       eta_delay: etaDelay,
       transit_days: transitDays,
       packing: String(rec.packing||'').trim(),
@@ -901,7 +908,7 @@ function bucketDate(isoDateStr, todayIso){
   return 'post_tomorrow';
 }
 
-function buildTimelineTable(rows, pocKey, plannedKey, actualKey, todayIso, naLabel, doneRowsOverride=null){
+function buildTimelineTable(rows, pocKey, plannedKey, actualKey, todayIso, naLabel, doneRows=[]){
   const pocOrder = [];
   const byPoc = {};
   function ensurePoc(name){
@@ -917,27 +924,21 @@ function buildTimelineTable(rows, pocKey, plannedKey, actualKey, todayIso, naLab
     const cell = ensurePoc(r[pocKey]);
     cell.shipments++;
     cell[bucket]++;
-    if(!doneRowsOverride && actualKey && r[actualKey] === todayIso) cell.doneToday++;
-    else if(!doneRowsOverride && bucket === 'today_or_before' && actualKey && !r[actualKey]) cell.notDoneToday++;
   });
 
-  if(doneRowsOverride){
-    doneRowsOverride.forEach(r=>{
-      const cell = ensurePoc(r[pocKey]);
-      cell.doneToday++;
-    });
-    // Pending pickup = dispatch-plan shipments due today or earlier that have
-    // not yet transitioned to In Transit today.
-    const pickedByPoc = {};
-    doneRowsOverride.forEach(r=>{
-      const k = r[pocKey] && r[pocKey].trim() ? r[pocKey].trim() : 'Not Assigned';
-      pickedByPoc[k] = (pickedByPoc[k]||0) + 1;
-    });
-    pocOrder.forEach(p=>{
-      const c=byPoc[p];
-      c.notDoneToday = Math.max(0, c.today_or_before - (pickedByPoc[p]||0));
-    });
-  }
+  // Pickup completion is driven by the shipment actually being In Transit today,
+  // not by the dispatch-plan row's ETD.  For pickup, doneRows is the current
+  // In Transit population and actualKey is its actual/tentative ETD.
+  doneRows.forEach(r=>{
+    if(r[actualKey] === todayIso) ensurePoc(r[pocKey]).doneToday++;
+  });
+
+  // Remaining pickup work is the planned Today-or-Before population that has
+  // not yet moved to In Transit today. Keep it non-negative if the source data
+  // contains more same-day In Transit shipments than today's dispatch-plan rows.
+  pocOrder.forEach(p=>{
+    byPoc[p].notDoneToday = Math.max(0, byPoc[p].today_or_before - byPoc[p].doneToday);
+  });
   pocOrder.sort((a,b)=> a==='Not Assigned' ? 1 : b==='Not Assigned' ? -1 : a.localeCompare(b));
 
   const totals = {shipments:0, today_or_before:0, tomorrow:0, post_tomorrow:0, not_assigned:0, doneToday:0, notDoneToday:0};
@@ -1036,12 +1037,7 @@ function renderOpsSnapshot(){
   const dispatchRows = allRecords.filter(r=>r.status==='Dispatch Plan');
   const transitRows = allRecords.filter(r=>r.status==='In Transit');
 
-  // Pickup completion is based on the actual status transition into In Transit,
-  // not on Actual/Tentative ETD. This prevents shipments merely planned for
-  // today from appearing as Picked Today.
-  const pickedTodayRows = transitRows.filter(r => r.actual_etd === todayIso);
-
-  const pickupTable = buildTimelineTable(dispatchRows, 'logistics_poc', 'planned_etd', null, todayIso, 'Not Assigned', pickedTodayRows);
+  const pickupTable = buildTimelineTable(dispatchRows, 'logistics_poc', 'planned_etd', 'actual_etd', todayIso, 'Not Assigned', transitRows);
   const deliveryTable = buildTimelineTable(transitRows, 'logistics_poc', 'planned_eta', 'actual_eta', todayIso, 'ETA NA');
 
   const pickupX2PlusTransit = dispatchRows.length*2 + transitRows.length;
@@ -1157,23 +1153,84 @@ function renderCharts(agg){
   destroyCharts();
   const monthOrder = agg.monthOrder.filter(m=>agg.byMonth[m] && agg.byMonth[m].ship>0);
 
+  // 1) On-Time ETA % — dedicated percentage chart
   charts.onTime = new Chart(document.getElementById('chartOnTime'), {
+    type:'line',
     data:{
       labels: monthOrder,
-      datasets:[
-        {type:'bar', label:'Shipments', data: monthOrder.map(m=>agg.byMonth[m].ship), backgroundColor:'#DEDACB', yAxisID:'y1', borderRadius:4},
-        {type:'line', label:'On-Time %', data: monthOrder.map(m=>{const b=agg.byMonth[m]; return b.etaCnt? (b.etaOk/b.etaCnt*100):null;}), borderColor: palette.teal, backgroundColor: palette.teal, yAxisID:'y', tension:0.3, pointRadius:4},
-        {type:'line', label:'Avg Delay (d)', data: monthOrder.map(m=>{const b=agg.byMonth[m]; return b.delayCnt? (b.delaySum/b.delayCnt):0;}), borderColor: palette.danger, backgroundColor: palette.danger, yAxisID:'y2', tension:0.3, pointRadius:4, borderDash:[4,3]},
-        {type:'line', label:'Avg Transit (d)', data: monthOrder.map(m=>{const b=agg.byMonth[m]; return b.transitCnt? (b.transitSum/b.transitCnt):null;}), borderColor: palette.navy2, backgroundColor: palette.navy2, yAxisID:'y2', tension:0.3, pointRadius:4, borderDash:[2,2]}
-      ]
+      datasets:[{
+        label:'On-Time %',
+        data: monthOrder.map(m=>{
+          const b=agg.byMonth[m];
+          return b.etaCnt ? (b.etaOk/b.etaCnt*100) : null;
+        }),
+        borderColor: palette.teal,
+        backgroundColor: palette.teal,
+        tension:0.3,
+        pointRadius:4,
+        pointHoverRadius:6,
+        borderWidth:3
+      }]
     },
     options:{responsive:true, maintainAspectRatio:false,
       scales:{
-        y:{position:'left', min:0, max:100, ticks:{callback:v=>v+'%'}, grid:{color:'#EFEADB'}},
-        y1:{display:false},
-        y2:{position:'right', grid:{drawOnChartArea:false}, ticks:{callback:v=>v+'d'}}
+        y:{min:0,max:100,ticks:{callback:v=>v+'%'},grid:{color:'#EFEADB'}}
       },
-      plugins:{legend:{position:'bottom'}}
+      plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>`On-Time: ${c.parsed.y.toFixed(1)}%`}}}
+    }
+  });
+
+  // 2) Average Transit Time — dedicated days chart
+  charts.avgTransit = new Chart(document.getElementById('chartAvgTransit'), {
+    type:'line',
+    data:{
+      labels: monthOrder,
+      datasets:[{
+        label:'Avg Transit (d)',
+        data: monthOrder.map(m=>{
+          const b=agg.byMonth[m];
+          return b.transitCnt ? (b.transitSum/b.transitCnt) : null;
+        }),
+        borderColor: palette.navy2,
+        backgroundColor: palette.navy2,
+        tension:0.3,
+        pointRadius:4,
+        pointHoverRadius:6,
+        borderWidth:3
+      }]
+    },
+    options:{responsive:true, maintainAspectRatio:false,
+      scales:{
+        y:{beginAtZero:true,ticks:{callback:v=>v+' d'},grid:{color:'#EFEADB'}}
+      },
+      plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>`Avg Transit: ${c.parsed.y.toFixed(1)} d`}}}
+    }
+  });
+
+  // 3) Average Delay — dedicated days chart
+  charts.avgDelay = new Chart(document.getElementById('chartAvgDelay'), {
+    type:'line',
+    data:{
+      labels: monthOrder,
+      datasets:[{
+        label:'Avg Delay (d)',
+        data: monthOrder.map(m=>{
+          const b=agg.byMonth[m];
+          return b.delayCnt ? (b.delaySum/b.delayCnt) : null;
+        }),
+        borderColor: palette.danger,
+        backgroundColor: palette.danger,
+        tension:0.3,
+        pointRadius:4,
+        pointHoverRadius:6,
+        borderWidth:3
+      }]
+    },
+    options:{responsive:true, maintainAspectRatio:false,
+      scales:{
+        y:{beginAtZero:true,ticks:{callback:v=>v+' d'},grid:{color:'#EFEADB'}}
+      },
+      plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>`Avg Delay: ${c.parsed.y.toFixed(1)} d`}}}
     }
   });
 
