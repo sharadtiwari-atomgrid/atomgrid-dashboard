@@ -473,6 +473,8 @@ const COLUMN_MAP = {
   'planned eta (fixed)': 'planned_eta',
   'actual/tentative etd': 'actual_etd',
   'actual/tentative eta': 'actual_eta',
+  'status confirmned date': 'status_confirmed_date',
+  'status confirmed date': 'status_confirmed_date',
   'packing': 'packing',
   'ag supply poc': 'supply_poc',
   'ag demand poc': 'demand_poc',
@@ -526,7 +528,7 @@ function parseDate(s, fmt){
     return null;
   }
 
-  m = s.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})$/);
+  m = s.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})(?:\s+\d{1,2}:\d{2}(?::\d{2})?)?$/);
   if(m){
     const a=+m[1], b=+m[2];
     let y=+m[3];
@@ -611,6 +613,7 @@ function rowsToRecords(rows, dateFmt, headerMode){
     const plannedEta = parseDate(rec.planned_eta, dateFmt);
     const actualEtd = parseDate(rec.actual_etd, dateFmt);
     const actualEta = parseDate(rec.actual_eta, dateFmt);
+    const statusConfirmedDate = parseDate(rec.status_confirmed_date, dateFmt);
     const etaDelay = daysBetween(plannedEta, actualEta);
     const transitDays = daysBetween(actualEtd, actualEta);
     const month = plannedEtd ? plannedEtd.toLocaleString('en-US',{month:'short'}) + " - " + String(plannedEtd.getFullYear()).slice(2) : "";
@@ -629,6 +632,7 @@ function rowsToRecords(rows, dateFmt, headerMode){
       planned_eta: fmtDate(plannedEta),
       actual_etd: fmtDate(actualEtd),
       actual_eta: fmtDate(actualEta),
+      status_confirmed_date: fmtDate(statusConfirmedDate),
       eta_delay: etaDelay,
       transit_days: transitDays,
       packing: String(rec.packing||'').trim(),
@@ -897,7 +901,7 @@ function bucketDate(isoDateStr, todayIso){
   return 'post_tomorrow';
 }
 
-function buildTimelineTable(rows, pocKey, plannedKey, actualKey, todayIso, naLabel){
+function buildTimelineTable(rows, pocKey, plannedKey, actualKey, todayIso, naLabel, doneRowsOverride=null){
   const pocOrder = [];
   const byPoc = {};
   function ensurePoc(name){
@@ -913,9 +917,27 @@ function buildTimelineTable(rows, pocKey, plannedKey, actualKey, todayIso, naLab
     const cell = ensurePoc(r[pocKey]);
     cell.shipments++;
     cell[bucket]++;
-    if(r[actualKey] === todayIso) cell.doneToday++;
-    else if(bucket === 'today_or_before' && !r[actualKey]) cell.notDoneToday++;
+    if(!doneRowsOverride && actualKey && r[actualKey] === todayIso) cell.doneToday++;
+    else if(!doneRowsOverride && bucket === 'today_or_before' && actualKey && !r[actualKey]) cell.notDoneToday++;
   });
+
+  if(doneRowsOverride){
+    doneRowsOverride.forEach(r=>{
+      const cell = ensurePoc(r[pocKey]);
+      cell.doneToday++;
+    });
+    // Pending pickup = dispatch-plan shipments due today or earlier that have
+    // not yet transitioned to In Transit today.
+    const pickedByPoc = {};
+    doneRowsOverride.forEach(r=>{
+      const k = r[pocKey] && r[pocKey].trim() ? r[pocKey].trim() : 'Not Assigned';
+      pickedByPoc[k] = (pickedByPoc[k]||0) + 1;
+    });
+    pocOrder.forEach(p=>{
+      const c=byPoc[p];
+      c.notDoneToday = Math.max(0, c.today_or_before - (pickedByPoc[p]||0));
+    });
+  }
   pocOrder.sort((a,b)=> a==='Not Assigned' ? 1 : b==='Not Assigned' ? -1 : a.localeCompare(b));
 
   const totals = {shipments:0, today_or_before:0, tomorrow:0, post_tomorrow:0, not_assigned:0, doneToday:0, notDoneToday:0};
@@ -1014,7 +1036,12 @@ function renderOpsSnapshot(){
   const dispatchRows = allRecords.filter(r=>r.status==='Dispatch Plan');
   const transitRows = allRecords.filter(r=>r.status==='In Transit');
 
-  const pickupTable = buildTimelineTable(dispatchRows, 'logistics_poc', 'planned_etd', 'actual_etd', todayIso, 'Not Assigned');
+  // Pickup completion is based on the actual status transition into In Transit,
+  // not on Actual/Tentative ETD. This prevents shipments merely planned for
+  // today from appearing as Picked Today.
+  const pickedTodayRows = transitRows.filter(r => r.status_confirmed_date === todayIso);
+
+  const pickupTable = buildTimelineTable(dispatchRows, 'logistics_poc', 'planned_etd', null, todayIso, 'Not Assigned', pickedTodayRows);
   const deliveryTable = buildTimelineTable(transitRows, 'logistics_poc', 'planned_eta', 'actual_eta', todayIso, 'ETA NA');
 
   const pickupX2PlusTransit = dispatchRows.length*2 + transitRows.length;
