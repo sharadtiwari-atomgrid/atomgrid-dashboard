@@ -142,13 +142,13 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
   .kpi .value{font-size:25px;font-weight:600;margin-top:4px;}
   .kpi .sub{font-family:'Helvetica Neue',Arial,sans-serif;font-size:11px;color:var(--muted);margin-top:2px;}
 
-  .grid{display:grid;grid-template-columns:1.4fr 1fr;gap:18px;margin-bottom:18px;}
-  .grid3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:18px;margin-bottom:18px;}
-  .panel{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:18px 20px 10px;}
-  .panel h3{margin:0 0 12px;font-size:14px;font-family:'Helvetica Neue',Arial,sans-serif;letter-spacing:0.3px;color:var(--navy);border-bottom:1px solid var(--line);padding-bottom:8px;}
-  .chart-box{position:relative;height:260px;}
-  .chart-box.tall{height:330px;}
-  .chart-box.short{height:210px;}
+  .grid{display:grid;grid-template-columns:1.4fr 1fr;gap:14px;margin-bottom:14px;align-items:start;}
+  .grid3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px;margin-bottom:14px;align-items:start;}
+  .panel{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:12px 14px 8px;}
+  .panel h3{margin:0 0 8px;font-size:13px;font-family:'Helvetica Neue',Arial,sans-serif;letter-spacing:0.3px;color:var(--navy);border-bottom:1px solid var(--line);padding-bottom:8px;}
+  .chart-box{position:relative;height:190px;}
+  .chart-box.tall{height:220px;}
+  .chart-box.short{height:165px;}
 
   /* Daily Ops Snapshot — mirrors the reference report layout */
   .snapshot-panel{background:var(--card);border:1px solid var(--line);border-radius:10px;overflow:hidden;margin-bottom:26px;font-family:'Helvetica Neue',Arial,sans-serif;}
@@ -374,7 +374,7 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
     </div>
     <div class="panel">
       <h3>Flagged Shipments (delay / discrepancy / dispute)</h3>
-      <div class="flagged-list" id="flaggedList" style="max-height:300px;overflow:auto;"></div>
+      <div class="flagged-list" id="flaggedList" style="max-height:180px;overflow:auto;"></div>
     </div>
   </div>
 
