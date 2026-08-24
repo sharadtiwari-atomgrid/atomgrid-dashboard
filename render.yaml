@@ -10,7 +10,7 @@ services:
       - key: PYTHON_VERSION
         value: 3.12.10
       - key: ALLOWED_EMAIL_DOMAIN
-        value: atomgrid.com
+        value: atomgrid.in
       - key: GOOGLE_CLIENT_ID
         sync: false
       - key: GOOGLE_CLIENT_SECRET

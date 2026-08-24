@@ -25,9 +25,9 @@ app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
 # ---------------------------------------------------------------------------
 # Authentication configuration
 # ---------------------------------------------------------------------------
-# Anyone whose Google account email ends with @atomgrid.com is allowed.
+# Anyone whose Google account email ends with @atomgrid.in is allowed.
 # Keep the domain configurable so it can be changed without editing code.
-ALLOWED_EMAIL_DOMAIN = os.environ.get('ALLOWED_EMAIL_DOMAIN', 'atomgrid.com').strip().lower().lstrip('@')
+ALLOWED_EMAIL_DOMAIN = os.environ.get('ALLOWED_EMAIL_DOMAIN', 'atomgrid.in').strip().lower().lstrip('@')
 GOOGLE_CLIENT_ID = os.environ.get('GOOGLE_CLIENT_ID', '').strip()
 GOOGLE_CLIENT_SECRET = os.environ.get('GOOGLE_CLIENT_SECRET', '').strip()
 GOOGLE_REDIRECT_URI = os.environ.get('GOOGLE_REDIRECT_URI', '').strip()
@@ -86,7 +86,7 @@ h1{font-size:23px;margin:0 0 8px}p{margin:0 0 24px;color:#657084;font-size:14px;
 </style></head><body><main class="card"><div class="logo">AG</div><h1>Atomgrid Dashboard</h1><p>Enter your Atomgrid email address to access the dashboard.</p>
 {% if error %}<div class="err">{{ error }}</div>{% endif %}
 <form method="post" action="{{ url_for('login') }}">
-<input class="input" type="email" name="email" placeholder="name@atomgrid.com" autocomplete="email" required>
+<input class="input" type="email" name="email" placeholder="name@atomgrid.in" autocomplete="email" required>
 <button class="btn" type="submit">Continue</button>
 </form>
 <div class="note">Access is limited to @{{ domain }} email addresses.</div></main></body></html>"""
