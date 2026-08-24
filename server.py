@@ -72,7 +72,7 @@ def login_url():
     return 'https://accounts.google.com/o/oauth2/v2/auth?' + urllib.parse.urlencode(params)
 
 
-LOGIN_PAGE = '''<!doctype html>
+LOGIN_PAGE = r"""<!doctype html>
 <html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Atomgrid Dashboard — Sign in</title>
 <style>
@@ -80,12 +80,16 @@ LOGIN_PAGE = '''<!doctype html>
 .card{width:min(440px,calc(100% - 32px));background:#fff;border:1px solid #e1ddd2;border-radius:18px;padding:34px;box-shadow:0 10px 35px rgba(23,36,58,.08);text-align:center}
 .logo{width:46px;height:46px;margin:0 auto 18px;border-radius:12px;background:#17243a;color:#fff;display:grid;place-items:center;font-weight:800;font-size:20px}
 h1{font-size:23px;margin:0 0 8px}p{margin:0 0 24px;color:#657084;font-size:14px;line-height:1.5}
-.btn{display:inline-flex;align-items:center;justify-content:center;gap:10px;width:100%;padding:12px 16px;border-radius:10px;background:#17243a;color:#fff;text-decoration:none;font-weight:650}
+.input{width:100%;padding:12px 14px;border:1px solid #d7d9df;border-radius:10px;font:inherit;font-size:15px;outline:none}.input:focus{border-color:#17243a;box-shadow:0 0 0 3px rgba(23,36,58,.08)}
+.btn{display:inline-flex;align-items:center;justify-content:center;width:100%;padding:12px 16px;margin-top:12px;border:0;border-radius:10px;background:#17243a;color:#fff;font-weight:650;font-size:15px;cursor:pointer}
 .note{margin-top:16px;font-size:12px;color:#8a93a2}.err{margin:0 0 18px;padding:10px 12px;border-radius:9px;background:#fff0ef;color:#a23b35;font-size:13px}
-</style></head><body><main class="card"><div class="logo">AG</div><h1>Atomgrid Dashboard</h1><p>Sign in with your Atomgrid Google account to access the dashboard.</p>
+</style></head><body><main class="card"><div class="logo">AG</div><h1>Atomgrid Dashboard</h1><p>Enter your Atomgrid email address to access the dashboard.</p>
 {% if error %}<div class="err">{{ error }}</div>{% endif %}
-{% if configured %}<a class="btn" href="{{ login_url }}">Continue with Google</a>{% else %}<div class="err">Google sign-in is not configured on this Render service yet.</div>{% endif %}
-<div class="note">Access is limited to @{{ domain }} accounts.</div></main></body></html>'''
+<form method="post" action="{{ url_for('login') }}">
+<input class="input" type="email" name="email" placeholder="name@atomgrid.com" autocomplete="email" required>
+<button class="btn" type="submit">Continue</button>
+</form>
+<div class="note">Access is limited to @{{ domain }} email addresses.</div></main></body></html>"""
 
 
 @app.before_request
@@ -110,69 +114,24 @@ def health():
     return jsonify(status='ok', service='atomgrid-dashboard')
 
 
-@app.get('/auth/login')
+@app.route('/auth/login', methods=['GET', 'POST'])
 def login():
     if session.get('user'):
         return redirect(url_for('index'))
     error = request.args.get('error')
-    if not auth_configured():
-        return render_template_string(LOGIN_PAGE, configured=False, login_url='#', error=error, domain=ALLOWED_EMAIL_DOMAIN)
-    return redirect(login_url())
-
-
-@app.get('/auth/callback')
-def oauth_callback():
-    error = request.args.get('error')
-    if error:
-        return redirect(url_for('login', error='Google sign-in was cancelled or denied.'))
-
-    state = request.args.get('state', '')
-    expected_state = session.pop('oauth_state', '')
-    if not state or not expected_state or not secrets.compare_digest(state, expected_state):
-        return redirect(url_for('login', error='Sign-in could not be verified. Please try again.'))
-
-    code = request.args.get('code', '')
-    if not code or not auth_configured() or requests is None or id_token is None:
-        return redirect(url_for('login', error='Google sign-in is not configured correctly.'))
-
-    try:
-        token_response = requests.post(
-            'https://oauth2.googleapis.com/token',
-            data={
-                'code': code,
-                'client_id': GOOGLE_CLIENT_ID,
-                'client_secret': GOOGLE_CLIENT_SECRET,
-                'redirect_uri': oauth_redirect_uri(),
-                'grant_type': 'authorization_code',
-            },
-            timeout=20,
-        )
-        token_response.raise_for_status()
-        token_data = token_response.json()
-        raw_id_token = token_data.get('id_token')
-        if not raw_id_token:
-            raise ValueError('Google did not return an ID token')
-
-        claims = id_token.verify_oauth2_token(
-            raw_id_token,
-            google_requests.Request(),
-            GOOGLE_CLIENT_ID,
-        )
-        email = (claims.get('email') or '').strip().lower()
-        if not claims.get('email_verified') or not user_allowed(email):
-            return redirect(url_for('login', error=f'Access is limited to @{ALLOWED_EMAIL_DOMAIN} accounts.'))
-
-        session.clear()
-        session.permanent = True
-        session['user'] = {
-            'email': email,
-            'name': claims.get('name') or email.split('@')[0],
-            'picture': claims.get('picture') or '',
-        }
-        return redirect(url_for('index'))
-    except Exception:
-        app.logger.exception('Google OAuth callback failed')
-        return redirect(url_for('login', error='Unable to sign you in with Google. Please try again.'))
+    if request.method == 'POST':
+        email = (request.form.get('email') or '').strip().lower()
+        if not user_allowed(email):
+            error = f'Please use an email address ending in @{ALLOWED_EMAIL_DOMAIN}.'
+        else:
+            session.clear()
+            session.permanent = True
+            session['user'] = {
+                'email': email,
+                'name': email.split('@')[0],
+            }
+            return redirect(request.args.get('next') or url_for('index'))
+    return render_template_string(LOGIN_PAGE, error=error, domain=ALLOWED_EMAIL_DOMAIN)
 
 
 @app.get('/auth/logout')
