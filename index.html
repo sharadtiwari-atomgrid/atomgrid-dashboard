@@ -198,6 +198,23 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
   .flagged-empty, .empty-state{color:var(--muted);font-size:12.5px;padding:10px 0;}
 
   footer{text-align:center;font-family:'Helvetica Neue',Arial,sans-serif;font-size:11px;color:var(--muted);padding:18px 0 30px;}
+
+  .quick-search input{min-width:190px;width:100%;box-sizing:border-box;border:1px solid var(--line);border-radius:6px;padding:8px 10px;font:12px 'Helvetica Neue',Arial,sans-serif;color:var(--navy);background:#fff;}
+  .filters .secondary{background:#F3F1EA;color:var(--navy);border:1px solid var(--line);}
+  .kpi{cursor:pointer;transition:transform .15s,box-shadow .15s,border-color .15s;}
+  .kpi:hover{transform:translateY(-1px);box-shadow:0 3px 12px rgba(22,35,59,.08);border-color:#C7C0B2;}
+  .active-filter-bar{display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin:8px 0 12px;font:11px 'Helvetica Neue',Arial,sans-serif;color:var(--muted);}
+  .filter-chip{display:inline-flex;align-items:center;gap:5px;padding:4px 8px;border-radius:12px;background:#F3F1EA;border:1px solid var(--line);color:var(--navy);}
+  .filter-chip button{border:0;background:none;color:var(--muted);cursor:pointer;padding:0;font-size:13px;line-height:1;}
+  .detail-overlay{position:fixed;inset:0;background:rgba(22,35,59,.28);display:none;align-items:center;justify-content:center;z-index:50;padding:18px;}
+  .detail-card{width:min(760px,96vw);max-height:88vh;overflow:auto;background:#fff;border:1px solid var(--line);border-radius:10px;box-shadow:0 12px 40px rgba(0,0,0,.18);padding:18px;}
+  .detail-head{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;border-bottom:1px solid var(--line);padding-bottom:10px;margin-bottom:12px;}
+  .detail-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px 16px;font:12px 'Helvetica Neue',Arial,sans-serif;}
+  .detail-item{padding:7px 0;border-bottom:1px solid #F0EDE5;}
+  .detail-item b{display:block;color:var(--muted);font-size:10px;text-transform:uppercase;letter-spacing:.3px;margin-bottom:2px;}
+  .detail-close{border:1px solid var(--line);background:#F3F1EA;border-radius:6px;padding:6px 10px;cursor:pointer;color:var(--navy);}
+  tbody tr{cursor:pointer;}
+  @media(max-width:700px){.detail-grid{grid-template-columns:1fr}.quick-search input{min-width:0}}
   @media(max-width:980px){ .kpis{grid-template-columns:repeat(2,1fr);} .grid,.grid3{grid-template-columns:1fr;} }
 </style>
 </head>
@@ -295,8 +312,11 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
     <div><label>Logistics Type</label><select id="f-logi"><option value="">All types</option></select></div>
     <div><label>Payment Term</label><select id="f-payment-term"><option value="">All payment terms</option></select></div>
     <div><label>Payment Status</label><select id="f-payment-status"><option value="">All payment status</option></select></div>
+    <div class="quick-search"><label>Quick Search</label><input id="f-search" type="search" placeholder="Job / customer / supplier…" autocomplete="off"></div>
     <button id="resetBtn" class="sans">Reset filters</button>
+    <button id="exportBtn" class="sans secondary">Export filtered CSV ↓</button>
   </div>
+  <div class="active-filter-bar" id="activeFilterBar" aria-live="polite"></div>
 
   <div class="kpis" id="kpiRow"></div>
 
@@ -395,7 +415,14 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
     </div>
   </div>
 
-  <footer>Connected Google Sheet · Auto-refresh enabled · Tax Invoice / E-Way Bill / COA / POD dots show presence, not content · build 2026-07-09c</footer>
+  <footer>Connected Google Sheet · Auto-refresh enabled · Tax Invoice / E-Way Bill / COA / POD dots show presence, not content · build 2026-07-09c-interactive</footer>
+</div>
+
+<div class="detail-overlay" id="detailOverlay" role="dialog" aria-modal="true" aria-labelledby="detailTitle">
+  <div class="detail-card">
+    <div class="detail-head"><div><div class="tag">Shipment detail</div><h2 id="detailTitle" style="margin:4px 0 0;font-size:20px;color:var(--navy);">Job</h2></div><button type="button" class="detail-close" id="detailClose">Close</button></div>
+    <div class="detail-grid" id="detailGrid"></div>
+  </div>
 </div>
 
 <script>
@@ -876,6 +903,7 @@ function fillSelect(id, values){
 });
 document.getElementById('resetBtn').addEventListener('click', ()=>{
   ['f-month','f-customer','f-supplier','f-dpoc','f-status','f-logi','f-payment-term','f-payment-status'].forEach(id=>document.getElementById(id).value='');
+  document.getElementById('f-search').value='';
   applyFilters();
 });
 
@@ -1270,7 +1298,7 @@ function renderTable(rows){
   body.innerHTML = slice.map(r=>{
     const cls = 'st-' + r.status.replace(/\s+/g,'');
     const delayTxt = r.eta_delay!==null ? (r.eta_delay>0? '+'+r.eta_delay : r.eta_delay) : '—';
-    return `<tr>
+    return `<tr data-job="${String(r.job).replace(/"/g,'&quot;')}">
       <td>${r.job}</td><td>${r.customer}</td><td>${r.supplier}</td><td>${r.product}</td><td>${fmtNum(r.qty)}</td>
       <td>${r.planned_etd||'—'} → ${r.planned_eta||'—'}</td>
       <td>${r.actual_etd||'—'} → ${r.actual_eta||'—'}</td>
@@ -1286,6 +1314,36 @@ function renderTable(rows){
   }).join('');
 }
 
+function updateActiveFilterBar(){
+  const bar=document.getElementById('activeFilterBar');
+  const defs=[['f-month','Month'],['f-customer','Customer'],['f-supplier','Supplier'],['f-dpoc','Demand POC'],['f-status','Status'],['f-logi','Logistics'],['f-payment-term','Payment Term'],['f-payment-status','Payment Status'],['f-search','Search']];
+  const chips=defs.map(([id,label])=>{const el=document.getElementById(id),v=String(el.value||'').trim();return v?`<span class="filter-chip">${label}: ${v}<button type="button" data-clear-filter="${id}">×</button></span>`:''}).filter(Boolean);
+  bar.innerHTML=chips.length?'<span>Active:</span>'+chips.join(''):'<span>Tip: click a chart segment or table row to drill down.</span>';
+  bar.querySelectorAll('[data-clear-filter]').forEach(b=>b.addEventListener('click',()=>{document.getElementById(b.dataset.clearFilter).value='';applyFilters();}));
+}
+function setFilter(id,value){const el=document.getElementById(id);if(!el)return;el.value=[...el.options].some(o=>o.value===value)?value:'';applyFilters();}
+function attachChartInteractions(monthOrder){
+  [['onTime','f-month'],['avgTransit','f-month'],['avgDelay','f-month']].forEach(([key])=>{const c=charts[key];if(c)c.options.onClick=(evt,e)=>{if(e.length)setFilter('f-month',monthOrder[e[0].index]);};if(c)c.update();});
+  if(charts.status){charts.status.options.onClick=(evt,e)=>{if(e.length)setFilter('f-status',charts.status.data.labels[e[0].index]);};charts.status.update();}
+  if(charts.logi){charts.logi.options.onClick=(evt,e)=>{if(e.length)setFilter('f-logi',charts.logi.data.labels[e[0].index]);};charts.logi.update();}
+  if(charts.paymentTerm){charts.paymentTerm.options.onClick=(evt,e)=>{if(e.length)setFilter('f-payment-term',charts.paymentTerm.data.labels[e[0].index]);};charts.paymentTerm.update();}
+}
+function openShipmentDetail(job){
+  const r=allRecords.find(x=>String(x.job)===String(job));if(!r)return;
+  const fields=[['Job No.',r.job],['Status',r.status],['Customer',r.customer],['Supplier',r.supplier],['Product',r.product],['Quantity',r.qty],['Planned ETD',r.planned_etd],['Planned ETA',r.planned_eta],['Actual/Tentative ETD',r.actual_etd],['Actual/Tentative ETA',r.actual_eta],['Logistics PoC',r.logistics_poc],['Logistics Type',r.logistics_type],['Payment Term',r.payment_term],['Payment Status',r.payment_status],['Transit Time',r.transit_time],['ETA Delay',r.eta_delay],['Remark',r.remark]];
+  document.getElementById('detailTitle').textContent='Job '+r.job;document.getElementById('detailGrid').innerHTML=fields.map(([k,v])=>`<div class="detail-item"><b>${k}</b>${v===null||v===undefined||v===''?'—':v}</div>`).join('');document.getElementById('detailOverlay').style.display='flex';
+}
+function exportFilteredRows(){
+  const jobs=[...document.querySelectorAll('#tableBody tr[data-job]')].map(tr=>tr.dataset.job),data=allRecords.filter(r=>jobs.includes(String(r.job)));if(!data.length)return;
+  const keys=['job','customer','supplier','product','qty','planned_etd','planned_eta','actual_etd','actual_eta','status','payment_term','payment_status','total_logistics_cost','logistics_cost_ag_to_pay','remark'];
+  const esc=v=>`"${String(v??'').replace(/"/g,'""')}"`;const csv=[keys.join(','),...data.map(r=>keys.map(k=>esc(r[k])).join(','))].join('\n');
+  const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv'}));a.download='atomgrid-filtered-shipments.csv';a.click();setTimeout(()=>URL.revokeObjectURL(a.href),500);
+}
+function bindInteractiveControls(){
+  document.getElementById('f-search').addEventListener('input',applyFilters);document.getElementById('exportBtn').addEventListener('click',exportFilteredRows);
+  document.getElementById('detailClose').addEventListener('click',()=>document.getElementById('detailOverlay').style.display='none');document.getElementById('detailOverlay').addEventListener('click',e=>{if(e.target.id==='detailOverlay')e.currentTarget.style.display='none';});document.addEventListener('keydown',e=>{if(e.key==='Escape')document.getElementById('detailOverlay').style.display='none';});
+}
+
 function applyFilters(){
   const m = document.getElementById('f-month').value;
   const c = document.getElementById('f-customer').value;
@@ -1295,20 +1353,27 @@ function applyFilters(){
   const lg = document.getElementById('f-logi').value;
   const pt = document.getElementById('f-payment-term').value;
   const ps = document.getElementById('f-payment-status').value;
-  const rows = allRecords.filter(r =>
-    (!m || r.month===m) && (!c || r.customer===c) && (!s || r.supplier===s) &&
-    (!dp || r.demand_poc===dp) && (!st || r.status===st) && (!lg || r.logistics_type===lg) &&
-    (!pt || r.payment_term===pt) && (!ps || r.payment_status===ps)
-  );
+  const q = String(document.getElementById('f-search').value || '').trim().toLowerCase();
+  const rows = allRecords.filter(r => {
+    const hay = [r.job,r.customer,r.supplier,r.product,r.demand_poc,r.supply_poc].map(v=>String(v||'').toLowerCase()).join(' ');
+    return (!m || r.month===m) && (!c || r.customer===c) && (!s || r.supplier===s) &&
+      (!dp || r.demand_poc===dp) && (!st || r.status===st) && (!lg || r.logistics_type===lg) &&
+      (!pt || r.payment_term===pt) && (!ps || r.payment_status===ps) && (!q || hay.includes(q));
+  });
   const agg = computeAgg(rows);
   renderKpis(agg);
   renderDocBars(agg);
   renderFlagged(agg);
   renderCharts(agg);
+  attachChartInteractions(agg.monthOrder.filter(m=>agg.byMonth[m] && agg.byMonth[m].ship>0));
   renderTable(rows);
+  updateActiveFilterBar();
+  document.querySelectorAll('#tableBody tr[data-job]').forEach(tr=>tr.addEventListener('click',()=>openShipmentDetail(tr.dataset.job)));
 }
 
 // ---------------------------------------------------------------
+bindInteractiveControls();
+
 // Boot
 // ---------------------------------------------------------------
 const hadCachedData = loadCachedData();
