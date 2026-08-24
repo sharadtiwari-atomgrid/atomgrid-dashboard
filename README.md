@@ -1,58 +1,30 @@
-# Atomgrid — Domestic MIS Live Dashboard (Render)
+# Atomgrid Domestic MIS Dashboard
 
-This version is prepared for Render and a **public Google Sheet**.
+Render-ready Flask dashboard for the Atomgrid Domestic MIS.
 
-## Architecture
+## Access control
 
-Google Sheet → Render Flask server → dashboard browser
+The dashboard is protected by Google OAuth. Only Google accounts whose email domain exactly matches `@atomgrid.com` can access it. The domain is configurable with `ALLOWED_EMAIL_DOMAIN`.
 
-The browser polls `/api/sheet-csv` automatically. Default refresh interval is **30 seconds**. You can change it to 15 seconds, 30 seconds, 60 seconds, 5 minutes, or manual in **Google Sheet → Refresh every**.
+### Render environment variables
 
-## Google Sheet setup
+Set these in Render:
 
-The exact tab must be publicly published:
+- `GOOGLE_CLIENT_ID` — Google OAuth Web application client ID
+- `GOOGLE_CLIENT_SECRET` — Google OAuth Web application client secret
+- `GOOGLE_REDIRECT_URI` — exact callback URL, e.g. `https://YOUR-SERVICE.onrender.com/auth/callback`
+- `SESSION_SECRET` — generated automatically by `render.yaml`
+- `ALLOWED_EMAIL_DOMAIN` — defaults to `atomgrid.com`
 
-**Google Sheets → File → Share → Publish to web → select the `Domestics MIS` tab → Publish**
+In Google Cloud Console, create a **Web application** OAuth client and add the exact Render callback URL to **Authorized redirect URIs**. Google requires the redirect URI used by the app to exactly match an authorized URI.
 
-Copy the Sheet ID from the URL:
+The app requests only OpenID, email and profile identity scopes. It does not request access to the user's Drive, Gmail, Calendar, or other Google data.
 
-`https://docs.google.com/spreadsheets/d/SHEET_ID/edit`
+## Run locally
 
-## Deploy to Render
+Set the OAuth environment variables, add `http://localhost:10000/auth/callback` as an authorized redirect URI for local testing, then run:
 
-### Option A — Blueprint (recommended)
-
-1. Put this folder in a GitHub repository.
-2. In Render choose **New → Blueprint**.
-3. Select the GitHub repository.
-4. Render reads `render.yaml` and creates the web service.
-
-### Option B — Web Service
-
-Use:
-
-- Runtime: **Python 3**
-- Build Command: `pip install -r requirements.txt`
-- Start Command: `gunicorn server:app --bind 0.0.0.0:$PORT --workers 2 --timeout 60`
-- Health Check Path: `/health`
-
-## After deployment
-
-1. Open the Render `onrender.com` URL.
-2. Click **Google Sheet — live connection**.
-3. Enter your Sheet ID.
-4. Enter the tab name, normally `Domestics MIS`.
-5. Choose **30 seconds**.
-6. Click **Save & connect**.
-
-Change a value in Google Sheets, wait for the next refresh, and the dashboard will update.
-
-## Important: what “realtime” means here
-
-This is **polling**, not a Google push/webhook. The dashboard checks the public Google Sheet every 30 seconds by default. For a MIS dashboard this is usually the simplest and most reliable approach.
-
-Render's free web services can spin down after 15 minutes without incoming traffic. When a user opens the dashboard again, Render starts the service back up. For a dashboard that must stay continuously warm, use a paid instance. See Render's current service documentation for plan limitations.
-
-
-## Dashboard customization
-The Top Customers, Top Suppliers, AG Demand POC Load, and AG Supply POC Load charts have been removed as requested. Logistics Arrangement remains.
+```bash
+pip install -r requirements.txt
+python server.py
+```

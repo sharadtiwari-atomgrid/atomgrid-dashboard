@@ -9,3 +9,13 @@ services:
     envVars:
       - key: PYTHON_VERSION
         value: 3.12.10
+      - key: ALLOWED_EMAIL_DOMAIN
+        value: atomgrid.com
+      - key: GOOGLE_CLIENT_ID
+        sync: false
+      - key: GOOGLE_CLIENT_SECRET
+        sync: false
+      - key: GOOGLE_REDIRECT_URI
+        sync: false
+      - key: SESSION_SECRET
+        generateValue: true

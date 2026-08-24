@@ -1,2 +1,4 @@
 Flask>=3.0,<4
 Gunicorn>=23,<24
+requests>=2.31,<3
+google-auth>=2.30,<3
