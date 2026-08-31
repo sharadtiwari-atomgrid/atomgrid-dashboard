@@ -1231,86 +1231,107 @@ function renderFlagged(agg){
 
 function renderCharts(agg){
   destroyCharts();
-  const monthOrder = agg.monthOrder.filter(m=>agg.byMonth[m] && agg.byMonth[m].ship>0);
 
-  // 1) On-Time ETA % — dedicated percentage chart
+  const selectedMonth = String(document.getElementById('f-month')?.value || '').trim();
+  const currentDate = new Date();
+  currentDate.setHours(0,0,0,0);
+  const currentMonthKey = currentDate.getFullYear()*12 + currentDate.getMonth();
+
+  // Performance charts show only completed/current months by default.
+  // Future months (e.g. Sep-26 when today is Aug-26) are excluded from the monthly trend.
+  const monthOrder = agg.monthOrder.filter(m=>{
+    if(!agg.byMonth[m] || agg.byMonth[m].ship<=0) return false;
+    return monthLabelSortKey(m) <= currentMonthKey;
+  });
+
+  let labels = monthOrder;
+  let metric = agg.byMonth;
+  let periodMode = 'month';
+
+  // When a month is selected, switch the three performance charts to weekly view.
+  // Week buckets are calendar ranges within the selected month: 1-7, 8-14, 15-21, 22-28, 29-end.
+  if(selectedMonth){
+    const selectedRows = getFilteredRowsForDashboard();
+    const sample = selectedRows.find(r=>r.planned_etd);
+    const parsed = sample ? new Date(String(sample.planned_etd)+'T00:00:00') : null;
+    let year = parsed && !isNaN(parsed) ? parsed.getFullYear() : null;
+    let monthIdx = parsed && !isNaN(parsed) ? parsed.getMonth() : null;
+    if(year===null || monthIdx===null){
+      const mk = String(selectedMonth).match(/^([A-Za-z]{3})\s*-\s*(\d{2,4})$/);
+      if(mk){
+        monthIdx = MONTH_ABBR_ORDER[mk[1]] ?? 0;
+        year = mk[2].length===2 ? 2000+Number(mk[2]) : Number(mk[2]);
+      }
+    }
+    if(year!==null && monthIdx!==null){
+      const daysInMonth = new Date(year, monthIdx+1, 0).getDate();
+      const weekCount = Math.ceil(daysInMonth/7);
+      labels = Array.from({length:weekCount},(_,i)=>`Week ${i+1}`);
+      metric = {};
+      labels.forEach((label,i)=>metric[label]={ship:0,etaOk:0,etaCnt:0,delaySum:0,delayCnt:0,transitSum:0,transitCnt:0});
+      selectedRows.forEach(r=>{
+        if(!r.planned_etd) return;
+        const d = new Date(String(r.planned_etd)+'T00:00:00');
+        if(isNaN(d) || d.getFullYear()!==year || d.getMonth()!==monthIdx) return;
+        const week = Math.floor((d.getDate()-1)/7);
+        const key = `Week ${week+1}`;
+        if(!metric[key]) return;
+        const b=metric[key];
+        b.ship++;
+        if(r.eta_delay!==null && r.eta_delay!==undefined){
+          b.etaCnt++;
+          if(r.eta_delay<=0) b.etaOk++;
+          else { b.delaySum += r.eta_delay; b.delayCnt++; }
+        }
+        if(r.transit_days!==null && r.transit_days!==undefined){
+          b.transitSum += r.transit_days; b.transitCnt++;
+        }
+      });
+      periodMode='week';
+    }
+  }
+
+  const periodSuffix = periodMode==='week' ? ' by Week' : ' by Month';
+  const setChartTitle=(canvasId,title)=>{
+    const canvas=document.getElementById(canvasId);
+    const panel=canvas?.closest('.panel');
+    const h3=panel?.querySelector('h3');
+    if(h3) h3.textContent=title;
+  };
+  setChartTitle('chartOnTime','On-Time ETA %'+periodSuffix);
+  setChartTitle('chartAvgTransit','Average Transit Time'+periodSuffix);
+  setChartTitle('chartAvgDelay','Average Delay'+periodSuffix);
+
   charts.onTime = new Chart(document.getElementById('chartOnTime'), {
     type:'line',
-    data:{
-      labels: monthOrder,
-      datasets:[{
-        label:'On-Time %',
-        data: monthOrder.map(m=>{
-          const b=agg.byMonth[m];
-          return b.etaCnt ? (b.etaOk/b.etaCnt*100) : null;
-        }),
-        borderColor: palette.teal,
-        backgroundColor: palette.teal,
-        tension:0.3,
-        pointRadius:4,
-        pointHoverRadius:6,
-        borderWidth:3
-      }]
-    },
+    data:{labels, datasets:[{label:'On-Time %', data:labels.map(k=>{
+      const b=metric[k]; return b&&b.etaCnt ? (b.etaOk/b.etaCnt*100) : null;
+    }), borderColor:palette.teal, backgroundColor:palette.teal, tension:0.3, pointRadius:4, pointHoverRadius:6, borderWidth:3}]},
     options:{responsive:true, maintainAspectRatio:false,
-      scales:{
-        y:{min:0,max:100,ticks:{callback:v=>v+'%'},grid:{color:'#EFEADB'}}
-      },
-      plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>`On-Time: ${c.parsed.y.toFixed(1)}%`}}}
+      scales:{y:{min:0,max:100,ticks:{callback:v=>v+'%'},grid:{color:'#EFEADB'}}},
+      plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>c.parsed.y==null?'No data':`On-Time: ${c.parsed.y.toFixed(1)}%`}}}
     }
   });
 
-  // 2) Average Transit Time — dedicated days chart
   charts.avgTransit = new Chart(document.getElementById('chartAvgTransit'), {
     type:'line',
-    data:{
-      labels: monthOrder,
-      datasets:[{
-        label:'Avg Transit (d)',
-        data: monthOrder.map(m=>{
-          const b=agg.byMonth[m];
-          return b.transitCnt ? (b.transitSum/b.transitCnt) : null;
-        }),
-        borderColor: palette.navy2,
-        backgroundColor: palette.navy2,
-        tension:0.3,
-        pointRadius:4,
-        pointHoverRadius:6,
-        borderWidth:3
-      }]
-    },
+    data:{labels, datasets:[{label:'Avg Transit (d)', data:labels.map(k=>{
+      const b=metric[k]; return b&&b.transitCnt ? (b.transitSum/b.transitCnt) : null;
+    }), borderColor:palette.navy2, backgroundColor:palette.navy2, tension:0.3, pointRadius:4, pointHoverRadius:6, borderWidth:3}]},
     options:{responsive:true, maintainAspectRatio:false,
-      scales:{
-        y:{beginAtZero:true,ticks:{callback:v=>v+' d'},grid:{color:'#EFEADB'}}
-      },
-      plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>`Avg Transit: ${c.parsed.y.toFixed(1)} d`}}}
+      scales:{y:{beginAtZero:true,ticks:{callback:v=>v+' d'},grid:{color:'#EFEADB'}}},
+      plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>c.parsed.y==null?'No data':`Avg Transit: ${c.parsed.y.toFixed(1)} d`}}}
     }
   });
 
-  // 3) Average Delay — dedicated days chart
   charts.avgDelay = new Chart(document.getElementById('chartAvgDelay'), {
     type:'line',
-    data:{
-      labels: monthOrder,
-      datasets:[{
-        label:'Avg Delay (d)',
-        data: monthOrder.map(m=>{
-          const b=agg.byMonth[m];
-          return b.delayCnt ? (b.delaySum/b.delayCnt) : null;
-        }),
-        borderColor: palette.danger,
-        backgroundColor: palette.danger,
-        tension:0.3,
-        pointRadius:4,
-        pointHoverRadius:6,
-        borderWidth:3
-      }]
-    },
+    data:{labels, datasets:[{label:'Avg Delay (d)', data:labels.map(k=>{
+      const b=metric[k]; return b&&b.delayCnt ? (b.delaySum/b.delayCnt) : null;
+    }), borderColor:palette.danger, backgroundColor:palette.danger, tension:0.3, pointRadius:4, pointHoverRadius:6, borderWidth:3}]},
     options:{responsive:true, maintainAspectRatio:false,
-      scales:{
-        y:{beginAtZero:true,ticks:{callback:v=>v+' d'},grid:{color:'#EFEADB'}}
-      },
-      plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>`Avg Delay: ${c.parsed.y.toFixed(1)} d`}}}
+      scales:{y:{beginAtZero:true,ticks:{callback:v=>v+' d'},grid:{color:'#EFEADB'}}},
+      plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>c.parsed.y==null?'No data':`Avg Delay: ${c.parsed.y.toFixed(1)} d`}}}
     }
   });
 
@@ -1375,7 +1396,11 @@ function updateActiveFilterBar(){
 }
 function setFilter(id,value){const el=document.getElementById(id);if(!el)return;el.value=[...el.options].some(o=>o.value===value)?value:'';applyFilters();}
 function attachChartInteractions(monthOrder){
-  [['onTime','f-month'],['avgTransit','f-month'],['avgDelay','f-month']].forEach(([key])=>{const c=charts[key];if(c)c.options.onClick=(evt,e)=>{if(e.length)setFilter('f-month',monthOrder[e[0].index]);};if(c)c.update();});
+  const selectedMonth=String(document.getElementById('f-month')?.value||'').trim();
+  if(!selectedMonth){
+    [['onTime','f-month'],['avgTransit','f-month'],['avgDelay','f-month']].forEach(([key])=>{const c=charts[key];if(c)c.options.onClick=(evt,e)=>{if(e.length)setFilter('f-month',monthOrder[e[0].index]);};if(c)c.update();});
+  }
+
   if(charts.status){charts.status.options.onClick=(evt,e)=>{if(e.length)setFilter('f-status',charts.status.data.labels[e[0].index]);};charts.status.update();}
   if(charts.logi){charts.logi.options.onClick=(evt,e)=>{if(e.length)setFilter('f-logi',charts.logi.data.labels[e[0].index]);};charts.logi.update();}
   if(charts.paymentTerm){charts.paymentTerm.options.onClick=(evt,e)=>{if(e.length)setFilter('f-payment-term',charts.paymentTerm.data.labels[e[0].index]);};charts.paymentTerm.update();}
