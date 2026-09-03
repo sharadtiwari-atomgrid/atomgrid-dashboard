@@ -126,6 +126,17 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
     font-family:'Helvetica Neue',Arial,sans-serif; padding:6px 8px; border:1px solid var(--line);
     border-radius:6px; background:#fff; color:var(--ink); font-size:13px; min-width:150px;
   }
+  .month-multi-filter{position:relative;min-width:168px;}
+  .multi-select{position:relative;}
+  .multi-select-btn{width:100%;height:34px;padding:0 10px;border:1px solid var(--line);border-radius:7px;background:#fff;color:var(--navy);font:13px 'Helvetica Neue',Arial,sans-serif;text-align:left;cursor:pointer;display:flex;justify-content:space-between;align-items:center;}
+  .multi-select-btn:hover{border-color:#9aa4b5;}
+  .multi-select-menu{display:none;position:absolute;z-index:50;left:0;right:0;top:38px;background:#fff;border:1px solid var(--line);border-radius:8px;box-shadow:0 10px 24px rgba(22,35,59,.14);padding:6px;max-height:250px;overflow:auto;}
+  .multi-select.open .multi-select-menu{display:block;}
+  .month-option{display:flex;align-items:center;gap:8px;padding:7px 8px;border-radius:5px;font-size:12px;color:var(--navy);cursor:pointer;}
+  .month-option:hover{background:#F3F1EA;}
+  .month-option input{accent-color:var(--navy);margin:0;}
+  .month-option.all{border-bottom:1px solid var(--line);margin-bottom:4px;font-weight:600;}
+
   .filters button{
     font-family:'Helvetica Neue',Arial,sans-serif; background:var(--navy); color:#fff; border:none;
     border-radius:6px; padding:8px 14px; font-size:12px; cursor:pointer; letter-spacing:0.5px;
@@ -329,7 +340,13 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
   </div>
 
   <div class="filters">
-    <div><label>Planned ETD month</label><select id="f-month"><option value="">All months</option></select></div>
+    <div class="month-multi-filter"><label>Planned ETD month</label>
+      <div class="multi-select" id="monthMultiSelect">
+        <button type="button" class="multi-select-btn" id="f-month-btn" aria-haspopup="listbox" aria-expanded="false">All months <span>▾</span></button>
+        <div class="multi-select-menu" id="f-month-menu" role="listbox" aria-multiselectable="true"></div>
+      </div>
+      <select id="f-month" multiple hidden aria-hidden="true"></select>
+    </div>
     <div><label>Customer</label><select id="f-customer"><option value="">All customers</option></select></div>
     <div><label>Supplier</label><select id="f-supplier"><option value="">All suppliers</option></select></div>
     <div><label>AG Demand POC</label><select id="f-dpoc"><option value="">All POC</option></select></div>
@@ -934,7 +951,7 @@ function uniqueSortedMonths(arr){
 let filtersPopulated = false;
 function populateFilterOptions(){
   const monthOrder = uniqueSortedMonths(allRecords.map(r=>r.month));
-  fillSelect('f-month', monthOrder);
+  populateMonthMultiSelect(monthOrder);
   fillSelect('f-customer', uniqueSorted(allRecords.map(r=>r.customer)));
   fillSelect('f-supplier', uniqueSorted(allRecords.map(r=>r.supplier)));
   fillSelect('f-dpoc', uniqueSorted(allRecords.map(r=>r.demand_poc)));
@@ -943,6 +960,58 @@ function populateFilterOptions(){
   fillSelect('f-payment-term', uniqueSorted(allRecords.map(r=>r.payment_term)));
   fillSelect('f-payment-status', uniqueSorted(allRecords.map(r=>r.payment_status)));
 }
+function getSelectedMonths(){
+  const sel=document.getElementById('f-month');
+  return sel ? Array.from(sel.selectedOptions).map(o=>o.value).filter(Boolean) : [];
+}
+function setSelectedMonths(values, trigger=true){
+  const sel=document.getElementById('f-month');
+  if(!sel)return;
+  const wanted=new Set((values||[]).filter(Boolean));
+  Array.from(sel.options).forEach(o=>o.selected=wanted.has(o.value));
+  updateMonthMultiLabel();
+  if(trigger) applyFilters();
+}
+function updateMonthMultiLabel(){
+  const vals=getSelectedMonths();
+  const btn=document.getElementById('f-month-btn');
+  if(!btn)return;
+  btn.innerHTML=(vals.length===0?'All months':(vals.length===1?vals[0]:`${vals.length} months selected`))+' <span>▾</span>';
+  document.querySelectorAll('#f-month-menu input[data-month]').forEach(cb=>cb.checked=vals.includes(cb.dataset.month));
+}
+function populateMonthMultiSelect(values){
+  const sel=document.getElementById('f-month');
+  const menu=document.getElementById('f-month-menu');
+  if(!sel||!menu)return;
+  const previous=getSelectedMonths();
+  sel.innerHTML='';
+  menu.innerHTML='';
+  const all=document.createElement('label');
+  all.className='month-option all';
+  all.innerHTML='<input type="checkbox" data-all-months> All months';
+  menu.appendChild(all);
+  values.forEach(v=>{
+    const opt=document.createElement('option'); opt.value=v; opt.textContent=v; sel.appendChild(opt);
+    const lab=document.createElement('label'); lab.className='month-option';
+    lab.innerHTML=`<input type="checkbox" data-month="${safe(v)}"> ${safe(v)}`;
+    menu.appendChild(lab);
+  });
+  const keep=previous.filter(v=>values.includes(v));
+  setSelectedMonths(keep,false);
+  const allCb=menu.querySelector('[data-all-months]');
+  allCb.checked=keep.length===0;
+  allCb.addEventListener('change',()=>{
+    setSelectedMonths([],true);
+    menu.querySelectorAll('input[data-month]').forEach(cb=>cb.checked=false);
+    allCb.checked=true;
+  });
+  menu.querySelectorAll('input[data-month]').forEach(cb=>cb.addEventListener('change',()=>{
+    const selected=Array.from(menu.querySelectorAll('input[data-month]:checked')).map(x=>x.dataset.month);
+    setSelectedMonths(selected,true);
+    allCb.checked=selected.length===0;
+  }));
+  updateMonthMultiLabel();
+}
 function fillSelect(id, values){
   const sel = document.getElementById(id);
   const current = sel.value;
@@ -950,11 +1019,14 @@ function fillSelect(id, values){
   values.forEach(v=>{ const opt=document.createElement('option'); opt.value=v; opt.textContent=v; sel.appendChild(opt); });
   if(values.includes(current)) sel.value = current;
 }
-['f-month','f-customer','f-supplier','f-dpoc','f-status','f-logi','f-payment-term','f-payment-status'].forEach(id=>{
+['f-customer','f-supplier','f-dpoc','f-status','f-logi','f-payment-term','f-payment-status'].forEach(id=>{
   document.getElementById(id).addEventListener('change', applyFilters);
 });
+document.getElementById('f-month-btn').addEventListener('click',()=>{const w=document.getElementById('monthMultiSelect');w.classList.toggle('open');document.getElementById('f-month-btn').setAttribute('aria-expanded',w.classList.contains('open'));});
+document.addEventListener('click',e=>{const w=document.getElementById('monthMultiSelect');if(w&&!w.contains(e.target)){w.classList.remove('open');document.getElementById('f-month-btn').setAttribute('aria-expanded','false');}});
 document.getElementById('resetBtn').addEventListener('click', ()=>{
-  ['f-month','f-customer','f-supplier','f-dpoc','f-status','f-logi','f-payment-term','f-payment-status'].forEach(id=>document.getElementById(id).value='');
+  setSelectedMonths([],false);
+  ['f-customer','f-supplier','f-dpoc','f-status','f-logi','f-payment-term','f-payment-status'].forEach(id=>document.getElementById(id).value='');
   document.getElementById('f-search').value='';
   applyFilters();
 });
@@ -1232,7 +1304,8 @@ function renderFlagged(agg){
 function renderCharts(agg){
   destroyCharts();
 
-  const selectedMonth = String(document.getElementById('f-month')?.value || '').trim();
+  const selectedMonths = getSelectedMonths();
+  const selectedMonth = selectedMonths.length===1 ? selectedMonths[0] : '';
   const currentDate = new Date();
   currentDate.setHours(0,0,0,0);
   const currentMonthKey = currentDate.getFullYear()*12 + currentDate.getMonth();
@@ -1390,13 +1463,14 @@ function renderTable(rows){
 function updateActiveFilterBar(){
   const bar=document.getElementById('activeFilterBar');
   const defs=[['f-month','Month'],['f-customer','Customer'],['f-supplier','Supplier'],['f-dpoc','Demand POC'],['f-status','Status'],['f-logi','Logistics'],['f-payment-term','Payment Term'],['f-payment-status','Payment Status'],['f-search','Search']];
-  const chips=defs.map(([id,label])=>{const el=document.getElementById(id),v=String(el.value||'').trim();return v?`<span class="filter-chip">${label}: ${v}<button type="button" data-clear-filter="${id}">×</button></span>`:''}).filter(Boolean);
+  const chips=defs.map(([id,label])=>{const el=document.getElementById(id);const v=id==='f-month'?getSelectedMonths().join(', '):String(el.value||'').trim();return v?`<span class="filter-chip">${label}: ${v}<button type="button" data-clear-filter="${id}">×</button></span>`:''}).filter(Boolean);
   bar.innerHTML=chips.length?'<span>Active:</span>'+chips.join(''):'<span>Tip: click a chart segment or table row to drill down.</span>';
-  bar.querySelectorAll('[data-clear-filter]').forEach(b=>b.addEventListener('click',()=>{document.getElementById(b.dataset.clearFilter).value='';applyFilters();}));
+  bar.querySelectorAll('[data-clear-filter]').forEach(b=>b.addEventListener('click',()=>{if(b.dataset.clearFilter==='f-month')setSelectedMonths([],true);else{document.getElementById(b.dataset.clearFilter).value='';applyFilters();}}));
 }
-function setFilter(id,value){const el=document.getElementById(id);if(!el)return;el.value=[...el.options].some(o=>o.value===value)?value:'';applyFilters();}
+function setFilter(id,value){const el=document.getElementById(id);if(!el)return;if(id==='f-month'){setSelectedMonths(value?[value]:[],true);return;}el.value=[...el.options].some(o=>o.value===value)?value:'';applyFilters();}
 function attachChartInteractions(monthOrder){
-  const selectedMonth=String(document.getElementById('f-month')?.value||'').trim();
+  const selectedMonths=getSelectedMonths();
+  const selectedMonth=selectedMonths.length===1?selectedMonths[0]:'';
   if(!selectedMonth){
     [['onTime','f-month'],['avgTransit','f-month'],['avgDelay','f-month']].forEach(([key])=>{const c=charts[key];if(c)c.options.onClick=(evt,e)=>{if(e.length)setFilter('f-month',monthOrder[e[0].index]);};if(c)c.update();});
   }
@@ -1479,8 +1553,8 @@ function bindTransitControls(){
   document.getElementById('transitViewAll')?.addEventListener('click',()=>{setFilter('f-status','In Transit');window.scrollTo({top:document.getElementById('inTransitControl').offsetTop-12,behavior:'smooth'});});
 }
 function getFilteredRowsForDashboard(){
-  const m=document.getElementById('f-month').value,c=document.getElementById('f-customer').value,s=document.getElementById('f-supplier').value,dp=document.getElementById('f-dpoc').value,st=document.getElementById('f-status').value,lg=document.getElementById('f-logi').value,pt=document.getElementById('f-payment-term').value,ps=document.getElementById('f-payment-status').value,q=String(document.getElementById('f-search').value||'').trim().toLowerCase();
-  return allRecords.filter(r=>{const hay=[r.job,r.customer,r.supplier,r.product,r.demand_poc,r.supply_poc].map(v=>String(v||'').toLowerCase()).join(' ');return(!m||r.month===m)&&(!c||r.customer===c)&&(!s||r.supplier===s)&&(!dp||r.demand_poc===dp)&&(!st||r.status===st)&&(!lg||r.logistics_type===lg)&&(!pt||r.payment_term===pt)&&(!ps||r.payment_status===ps)&&(!q||hay.includes(q));});
+  const months=getSelectedMonths(),c=document.getElementById('f-customer').value,s=document.getElementById('f-supplier').value,dp=document.getElementById('f-dpoc').value,st=document.getElementById('f-status').value,lg=document.getElementById('f-logi').value,pt=document.getElementById('f-payment-term').value,ps=document.getElementById('f-payment-status').value,q=String(document.getElementById('f-search').value||'').trim().toLowerCase();
+  return allRecords.filter(r=>{const hay=[r.job,r.customer,r.supplier,r.product,r.demand_poc,r.supply_poc].map(v=>String(v||'').toLowerCase()).join(' ');return(!months.length||months.includes(r.month))&&(!c||r.customer===c)&&(!s||r.supplier===s)&&(!dp||r.demand_poc===dp)&&(!st||r.status===st)&&(!lg||r.logistics_type===lg)&&(!pt||r.payment_term===pt)&&(!ps||r.payment_status===ps)&&(!q||hay.includes(q));});
 }
 
 function applyFilters(){
