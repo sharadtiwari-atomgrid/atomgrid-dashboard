@@ -595,6 +595,7 @@ const COLUMN_MAP = {
   'payment term': 'payment_term',
   'payment status': 'payment_status',
   'logistics payment status': 'payment_status',
+  'transport payment status': 'payment_status',
   'tax invoice': 'tax_invoice_doc',
   'e-way bill': 'eway_doc',
   'coa': 'coa_doc',
@@ -1482,7 +1483,8 @@ function attachChartInteractions(monthOrder){
 }
 function openShipmentDetail(job){
   const r=allRecords.find(x=>String(x.job)===String(job));if(!r)return;
-  const fields=[['Job No.',r.job],['Status',r.status],['Customer',r.customer],['Supplier',r.supplier],['Product',r.product],['Quantity',r.qty],['Planned ETD',r.planned_etd],['Planned ETA',r.planned_eta],['Actual/Tentative ETD',r.actual_etd],['Actual/Tentative ETA',r.actual_eta],['Logistics PoC',r.logistics_poc],['Logistics Type',r.logistics_type],['Payment Term',r.payment_term],['Payment Status',r.payment_status],['Transit Time',r.transit_time],['ETA Delay',r.eta_delay],['Remark',r.remark]];
+  const transitDisplay = (r.transit_days===null || r.transit_days===undefined || !r.actual_etd || !r.actual_eta) ? '—' : `${r.transit_days} day${r.transit_days===1?'':'s'}`;
+  const fields=[['Job No.',r.job],['Status',r.status],['Customer',r.customer],['Supplier',r.supplier],['Product',r.product],['Quantity',r.qty],['Planned ETD',r.planned_etd],['Planned ETA',r.planned_eta],['Actual/Tentative ETD',r.actual_etd],['Actual/Tentative ETA',r.actual_eta],['Logistics PoC',r.logistics_poc],['Logistics Type',r.logistics_type],['Payment Term',r.payment_term],['Payment Status',r.payment_status],['Transit Time',transitDisplay],['ETA Delay',r.eta_delay],['Remark',r.remark]];
   document.getElementById('detailTitle').textContent='Job '+r.job;document.getElementById('detailGrid').innerHTML=fields.map(([k,v])=>`<div class="detail-item"><b>${k}</b>${v===null||v===undefined||v===''?'—':v}</div>`).join('');document.getElementById('detailOverlay').style.display='flex';
 }
 function exportFilteredRows(){
