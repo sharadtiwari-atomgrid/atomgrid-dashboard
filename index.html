@@ -931,6 +931,11 @@ if(refreshNowBtn) refreshNowBtn.addEventListener('click', fetchAndRender);
 // ---------------------------------------------------------------
 // Filters
 // ---------------------------------------------------------------
+// Escape HTML safely; defined before any filter-rendering code uses it.
+const safe = v => String(v ?? '').replace(/[&<>"']/g, c => ({
+  '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
+}[c]));
+
 function uniqueSorted(arr){ return [...new Set(arr)].filter(v=>v && v!=='nan').sort(); }
 
 // Months are labeled "MMM - YY" (e.g. "Apr - 26"). A plain string sort puts
@@ -1157,10 +1162,6 @@ function renderUpcomingShipments(){
     body.innerHTML = '<tr><td colspan="10" class="empty-state">No Dispatch Plan shipments scheduled for today/future, and no On Hold shipments found.</td></tr>';
     return;
   }
-
-  const safe = v => String(v ?? '').replace(/[&<>"']/g, c => ({
-    '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
-  }[c]));
 
   body.innerHTML = upcoming.slice(0,100).map(({r}) => `
     <tr>
