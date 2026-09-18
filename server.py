@@ -9,6 +9,20 @@ import urllib.error
 from flask import Flask, Response, jsonify, redirect, render_template_string, request, session, send_from_directory, url_for
 from werkzeug.middleware.proxy_fix import ProxyFix
 
+import base64
+import hashlib
+import hmac
+import json
+import threading
+from datetime import datetime, timezone
+
+try:
+    from cryptography.hazmat.primitives import serialization
+    from cryptography.hazmat.primitives.asymmetric import padding
+    from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+except ImportError:  # pragma: no cover
+    serialization = padding = Cipher = algorithms = modes = None
+
 try:
     import requests
     from google.auth.transport import requests as google_requests
@@ -32,6 +46,21 @@ GOOGLE_CLIENT_ID = os.environ.get('GOOGLE_CLIENT_ID', '').strip()
 GOOGLE_CLIENT_SECRET = os.environ.get('GOOGLE_CLIENT_SECRET', '').strip()
 GOOGLE_REDIRECT_URI = os.environ.get('GOOGLE_REDIRECT_URI', '').strip()
 SESSION_SECRET = os.environ.get('SESSION_SECRET', '').strip()
+
+# E-Way Bill API configuration. Keep all credentials on the backend/Render.
+EWB_API_BASE_URL = os.environ.get('EWB_API_BASE_URL', '').strip().rstrip('/')
+EWB_AUTH_PATH = os.environ.get('EWB_AUTH_PATH', '/v1.03/auth').strip()
+EWB_GET_PATH = os.environ.get('EWB_GET_PATH', '/v1.03/ewayapi/GetEwayBill').strip()
+EWB_CLIENT_ID = os.environ.get('EWB_CLIENT_ID', '').strip()
+EWB_CLIENT_SECRET = os.environ.get('EWB_CLIENT_SECRET', '').strip()
+EWB_GSTIN = os.environ.get('EWB_GSTIN', '').strip().upper()
+EWB_USERNAME = os.environ.get('EWB_USERNAME', '').strip()
+EWB_PASSWORD = os.environ.get('EWB_PASSWORD', '').strip()
+EWB_PUBLIC_KEY = os.environ.get('EWB_PUBLIC_KEY', '').strip()
+EWB_TIMEOUT_SECONDS = int(os.environ.get('EWB_TIMEOUT_SECONDS', '30'))
+
+_ewb_token = {'authtoken': '', 'sek': b'', 'expires_at': 0}
+_ewb_token_lock = threading.Lock()
 
 app.secret_key = SESSION_SECRET or secrets.token_hex(32)
 app.config.update(
@@ -141,6 +170,118 @@ def logout():
 
 
 DEFAULT_PUBLISHED_CSV_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vRexCOYViGE7Jk8t95Yr7t_NaxZcyrZzguKD9hN6MBRHcONsneckfFMpOki6xYlHFE3Evx8CdbTZz_R/pub?gid=0&single=true&output=csv'
+
+
+def _ewb_configured():
+    return all([EWB_API_BASE_URL, EWB_CLIENT_ID, EWB_CLIENT_SECRET, EWB_GSTIN, EWB_USERNAME, EWB_PASSWORD, EWB_PUBLIC_KEY]) and bool(Cipher and serialization and padding)
+
+
+def _aes_ecb_decrypt(ciphertext_b64, key):
+    raw = base64.b64decode(ciphertext_b64)
+    decryptor = Cipher(algorithms.AES(key), modes.ECB()).decryptor()
+    padded = decryptor.update(raw) + decryptor.finalize()
+    pad_len = padded[-1]
+    if pad_len < 1 or pad_len > 16 or padded[-pad_len:] != bytes([pad_len]) * pad_len:
+        raise ValueError('Invalid AES padding from E-Way Bill API')
+    return padded[:-pad_len]
+
+
+def _rsa_encrypt_base64(data_b64_text):
+    key_text = EWB_PUBLIC_KEY
+    if 'BEGIN PUBLIC KEY' in key_text:
+        public_key = serialization.load_pem_public_key(key_text.encode('utf-8'))
+    else:
+        public_key = serialization.load_der_public_key(base64.b64decode(key_text))
+    encrypted = public_key.encrypt(data_b64_text.encode('utf-8'), padding.PKCS1v15())
+    return base64.b64encode(encrypted).decode('ascii')
+
+
+def _ewb_authenticate():
+    now = datetime.now(timezone.utc).timestamp()
+    with _ewb_token_lock:
+        if _ewb_token['authtoken'] and _ewb_token['sek'] and now < _ewb_token['expires_at']:
+            return _ewb_token['authtoken'], _ewb_token['sek']
+        app_key = os.urandom(32)
+        app_key_b64 = base64.b64encode(app_key).decode('ascii')
+        auth_json = json.dumps({'action': 'ACCESSTOKEN', 'username': EWB_USERNAME, 'password': EWB_PASSWORD, 'app_key': app_key_b64}, separators=(',', ':'))
+        encoded_auth = base64.b64encode(auth_json.encode('utf-8')).decode('ascii')
+        response = requests.post(
+            EWB_API_BASE_URL + EWB_AUTH_PATH,
+            json={'Data': _rsa_encrypt_base64(encoded_auth)},
+            headers={'client-id': EWB_CLIENT_ID, 'client-secret': EWB_CLIENT_SECRET, 'gstin': EWB_GSTIN, 'Content-Type': 'application/json'},
+            timeout=EWB_TIMEOUT_SECONDS,
+        )
+        response.raise_for_status()
+        body = response.json()
+        if str(body.get('status', '0')) != '1':
+            raise RuntimeError('E-Way Bill authentication failed: ' + json.dumps(body.get('errorDetails') or body.get('error') or body))
+        data = body.get('data') if isinstance(body.get('data'), dict) else body
+        authtoken = data.get('authToken') or data.get('authtoken')
+        encrypted_sek = data.get('sek') or data.get('Sek')
+        if not authtoken or not encrypted_sek:
+            raise RuntimeError('E-Way Bill authentication response did not contain authtoken/sek')
+        sek = _aes_ecb_decrypt(encrypted_sek, app_key)
+        _ewb_token.update({'authtoken': authtoken, 'sek': sek, 'expires_at': now + (350 * 60)})
+        return authtoken, sek
+
+
+def _ewb_get_details(ewb_no):
+    authtoken, sek = _ewb_authenticate()
+    response = requests.get(
+        EWB_API_BASE_URL + EWB_GET_PATH,
+        params={'ewbNo': ewb_no},
+        headers={'client-id': EWB_CLIENT_ID, 'client-secret': EWB_CLIENT_SECRET, 'gstin': EWB_GSTIN, 'authtoken': authtoken, 'Content-Type': 'application/json'},
+        timeout=EWB_TIMEOUT_SECONDS,
+    )
+    response.raise_for_status()
+    body = response.json()
+    if str(body.get('status', '0')) != '1':
+        raise RuntimeError('E-Way Bill lookup failed: ' + json.dumps(body.get('errorDetails') or body.get('error') or body))
+    encrypted_rek = body.get('rek')
+    encrypted_data = body.get('data')
+    if not encrypted_rek or not encrypted_data:
+        raise RuntimeError('E-Way Bill response is missing encrypted data')
+    rek = _aes_ecb_decrypt(encrypted_rek, sek)
+    encoded_data = _aes_ecb_decrypt(encrypted_data, rek)
+    expected_hmac = base64.b64encode(hmac.new(rek, encoded_data, hashlib.sha256).digest()).decode('ascii')
+    supplied_hmac = body.get('hmac') or ''
+    if supplied_hmac and not hmac.compare_digest(supplied_hmac, expected_hmac):
+        raise RuntimeError('E-Way Bill response HMAC verification failed')
+    return json.loads(base64.b64decode(encoded_data).decode('utf-8'))
+
+
+def _ewb_normalize(details):
+    vehicles = details.get('VehiclListDetails') or details.get('vehicleListDetails') or []
+    latest_vehicle = vehicles[-1] if vehicles else {}
+    return {
+        'success': True,
+        'status': details.get('status'),
+        'ewbNo': details.get('ewbNo') or details.get('ewayBillNo'),
+        'vehicleNo': latest_vehicle.get('vehicleNo') or details.get('vehicleNo'),
+        'fromPlace': latest_vehicle.get('fromPlace') or details.get('fromPlace'),
+        'toPlace': details.get('toPlace'),
+        'actualDist': details.get('actualDist'),
+        'validUpto': details.get('validUpto'),
+        'lastUpdated': latest_vehicle.get('enteredDate') or details.get('ewayBillDate'),
+        'vehicleUpdates': vehicles,
+    }
+
+
+@app.get('/api/ewaybill-details')
+def ewaybill_details():
+    ewb_no = ''.join(ch for ch in (request.args.get('ewb_no') or '').strip() if ch.isdigit())
+    if len(ewb_no) != 12:
+        return jsonify(success=False, error='E-Way Bill number must be a 12-digit number.'), 400
+    if not _ewb_configured():
+        return jsonify(success=False, configured=False, error='E-Way Bill API is not configured on the Render backend.'), 503
+    try:
+        return jsonify(_ewb_normalize(_ewb_get_details(ewb_no)))
+    except requests.HTTPError as exc:
+        status = exc.response.status_code if exc.response is not None else 502
+        return jsonify(success=False, error=f'E-Way Bill API returned HTTP {status}.'), 502
+    except Exception as exc:
+        app.logger.exception('E-Way Bill lookup failed for %s', ewb_no)
+        return jsonify(success=False, error=str(exc)), 502
 
 
 @app.get('/api/sheet-csv')
