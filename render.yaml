@@ -19,3 +19,23 @@ services:
         sync: false
       - key: SESSION_SECRET
         generateValue: true
+      - key: EWB_API_BASE_URL
+        sync: false
+      - key: EWB_AUTH_PATH
+        value: /v1.03/auth
+      - key: EWB_GET_PATH
+        value: /v1.03/ewayapi/GetEwayBill
+      - key: EWB_CLIENT_ID
+        sync: false
+      - key: EWB_CLIENT_SECRET
+        sync: false
+      - key: EWB_GSTIN
+        sync: false
+      - key: EWB_USERNAME
+        sync: false
+      - key: EWB_PASSWORD
+        sync: false
+      - key: EWB_PUBLIC_KEY
+        sync: false
+      - key: EWB_TIMEOUT_SECONDS
+        value: "30"
