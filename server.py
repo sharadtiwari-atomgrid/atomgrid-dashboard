@@ -219,6 +219,11 @@ def index():
     return send_from_directory(BASE_DIR, 'index.html')
 
 
+@app.get('/transporter-finder')
+def transporter_finder():
+    return send_from_directory(BASE_DIR, 'transporter_finder.html')
+
+
 @app.get('/<path:path>')
 def static_files(path):
     return send_from_directory(BASE_DIR, path)
