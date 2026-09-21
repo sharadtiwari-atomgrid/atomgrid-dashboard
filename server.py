@@ -61,6 +61,12 @@ EWB_USERNAME = os.environ.get('EWB_USERNAME', '').strip()
 EWB_PASSWORD = os.environ.get('EWB_PASSWORD', '').strip()
 EWB_PUBLIC_KEY = os.environ.get('EWB_PUBLIC_KEY', '').strip()
 EWB_TIMEOUT_SECONDS = int(os.environ.get('EWB_TIMEOUT_SECONDS', '30'))
+# ClearTax E-Way Bill API configuration. Keep credentials on Render.
+CLEARTAX_API_BASE_URL = os.environ.get('CLEARTAX_API_BASE_URL', 'https://api.cleartax.in').strip().rstrip('/')
+CLEARTAX_EWB_PATH = os.environ.get('CLEARTAX_EWB_PATH', '/einv/v1/ewaybill/sync').strip()
+CLEARTAX_AUTH_TOKEN = os.environ.get('CLEARTAX_AUTH_TOKEN', '').strip()
+CLEARTAX_GSTIN = os.environ.get('CLEARTAX_GSTIN', '').strip().upper()
+CLEARTAX_TIMEOUT_SECONDS = int(os.environ.get('CLEARTAX_TIMEOUT_SECONDS', '30'))
 VAYANA_BASE_URL = os.environ.get('VAYANA_BASE_URL', 'https://solo.enriched-api.vayana.com').strip().rstrip('/')
 VAYANA_AUTH_URL = os.environ.get('VAYANA_AUTH_URL', 'https://sandbox.services.vayananet.com/theodore/apis/v1/authtokens').strip().rstrip('/')
 VAYANA_EMAIL = os.environ.get('VAYANA_EMAIL', '').strip()
@@ -187,6 +193,104 @@ def logout():
 
 
 DEFAULT_PUBLISHED_CSV_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vRexCOYViGE7Jk8t95Yr7t_NaxZcyrZzguKD9hN6MBRHcONsneckfFMpOki6xYlHFE3Evx8CdbTZz_R/pub?gid=0&single=true&output=csv'
+
+
+def _cleartax_configured():
+    return bool(CLEARTAX_AUTH_TOKEN and CLEARTAX_GSTIN and requests is not None)
+
+
+def _cleartax_get_details(ewb_no):
+    """Fetch the latest government E-Way Bill status through ClearTax."""
+    url = CLEARTAX_API_BASE_URL + CLEARTAX_EWB_PATH
+    response = requests.get(
+        url,
+        params={'ewb_number': ewb_no},
+        headers={
+            'X-Cleartax-Auth-Token': CLEARTAX_AUTH_TOKEN,
+            'gstin': CLEARTAX_GSTIN,
+            'Accept': 'application/json',
+        },
+        timeout=CLEARTAX_TIMEOUT_SECONDS,
+    )
+    if response.status_code >= 400:
+        try:
+            payload = response.json()
+            detail = payload.get('message') or payload.get('error') or payload.get('errorDetails') or payload
+        except ValueError:
+            detail = (response.text or '').strip()[:2000]
+        raise RuntimeError(
+            f'ClearTax EWB API returned HTTP {response.status_code}: '
+            f'{json.dumps(detail, ensure_ascii=False) if isinstance(detail, (dict, list)) else detail}'
+        )
+    try:
+        body = response.json()
+    except ValueError:
+        raise RuntimeError(f'ClearTax EWB API returned a non-JSON response (HTTP {response.status_code}).')
+    if isinstance(body, dict):
+        if str(body.get('status', '1')).lower() in ('0', 'false', 'error'):
+            detail = body.get('message') or body.get('error') or body.get('errorDetails') or body
+            raise RuntimeError('ClearTax EWB lookup failed: ' + json.dumps(detail, ensure_ascii=False))
+        data = body.get('data')
+        if isinstance(data, dict):
+            return data
+    return body
+
+
+def _cleartax_normalize(details):
+    if not isinstance(details, dict):
+        raise RuntimeError('ClearTax EWB response was not a JSON object.')
+    vehicles = (
+        details.get('VehiclListDetails')
+        or details.get('vehicleListDetails')
+        or details.get('vehicleUpdates')
+        or details.get('vehicleList')
+        or []
+    )
+    if isinstance(vehicles, dict):
+        vehicles = [vehicles]
+    latest_vehicle = vehicles[-1] if vehicles else {}
+
+    def first(*keys):
+        for key in keys:
+            value = details.get(key)
+            if value not in (None, ''):
+                return value
+            value = latest_vehicle.get(key) if isinstance(latest_vehicle, dict) else None
+            if value not in (None, ''):
+                return value
+        return None
+
+    return {
+        'success': True,
+        'provider': 'cleartax',
+        'status': first('status', 'ewbStatus', 'ewayBillStatus'),
+        'ewbNo': first('ewbNo', 'ewayBillNo', 'ewbNumber', 'ewb_number'),
+        'vehicleNo': first('vehicleNo', 'vehicleNumber'),
+        'fromPlace': first('fromPlace', 'from'),
+        'toPlace': first('toPlace', 'toPlace', 'to'),
+        'actualDist': first('actualDist', 'actualDistance', 'distance'),
+        'validUpto': first('validUpto', 'validUntil', 'validity'),
+        'lastUpdated': first('enteredDate', 'lastUpdated', 'updatedAt', 'ewbDate'),
+        'transporterName': first('transporterName'),
+        'transporterId': first('transporterId'),
+        'vehicleUpdates': vehicles,
+        'raw': details,
+    }
+
+
+@app.get('/api/cleartax-config-status')
+def cleartax_config_status():
+    return jsonify(
+        success=_cleartax_configured(),
+        configured=_cleartax_configured(),
+        variables={
+            'CLEARTAX_AUTH_TOKEN': bool(CLEARTAX_AUTH_TOKEN),
+            'CLEARTAX_GSTIN': bool(CLEARTAX_GSTIN),
+            'CLEARTAX_API_BASE_URL': CLEARTAX_API_BASE_URL,
+            'CLEARTAX_EWB_PATH': CLEARTAX_EWB_PATH,
+            'requests_package': requests is not None,
+        },
+    )
 
 
 def _vayana_missing_config():
@@ -567,33 +671,20 @@ def ewaybill_details():
     ewb_no = ''.join(ch for ch in (request.args.get('ewb_no') or '').strip() if ch.isdigit())
     if len(ewb_no) != 12:
         return jsonify(success=False, error='E-Way Bill number must be a 12-digit number.'), 400
+    if _cleartax_configured():
+        try:
+            return jsonify(_cleartax_normalize(_cleartax_get_details(ewb_no)))
+        except Exception as exc:
+            app.logger.exception('ClearTax EWB lookup failed for %s', ewb_no)
+            return jsonify(success=False, provider='cleartax', error=str(exc)), 502
+
     if _vayana_configured():
         try:
             return jsonify(_vayana_normalize(_vayana_get_details(ewb_no)))
         except requests.HTTPError as exc:
             response = exc.response
             status = response.status_code if response is not None else 502
-            vayana_error = None
-            if response is not None:
-                try:
-                    payload = response.json()
-                    if isinstance(payload, dict):
-                        vayana_error = payload.get('error') or payload.get('errorDetails') or payload.get('additionalInfo') or payload.get('message')
-                    else:
-                        vayana_error = str(payload)
-                except ValueError:
-                    vayana_error = (response.text or '').strip()[:2000]
-            app.logger.error(
-                'Vayana EWB HTTP error: status=%s body=%s',
-                status,
-                json.dumps(vayana_error, ensure_ascii=False) if isinstance(vayana_error, (dict, list)) else vayana_error
-            )
-            return jsonify(
-                success=False,
-                provider='vayana',
-                error=f'Vayana EWB API returned HTTP {status}.',
-                vayana_error=vayana_error,
-            ), 502
+            return jsonify(success=False, provider='vayana', error=f'Vayana EWB API returned HTTP {status}.'), 502
         except Exception as exc:
             app.logger.exception('Vayana EWB lookup failed for %s', ewb_no)
             return jsonify(success=False, provider='vayana', error=str(exc)), 502
@@ -601,7 +692,7 @@ def ewaybill_details():
     if not _ewb_configured():
         missing = _vayana_missing_config()
         app.logger.error('Vayana configuration incomplete. Missing: %s', ', '.join(missing) if missing else 'unknown')
-        return jsonify(success=False, configured=False, error='Vayana EWB configuration is incomplete.', missing=missing), 503
+        return jsonify(success=False, configured=False, error='No E-Way Bill provider is configured. Add ClearTax API credentials to enable EWB lookup.', missing=missing), 503
     try:
         return jsonify(_ewb_normalize(_ewb_get_details(ewb_no)))
     except requests.HTTPError as exc:
