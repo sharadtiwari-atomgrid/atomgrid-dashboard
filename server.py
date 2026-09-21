@@ -82,6 +82,16 @@ VAYANA_TIMEOUT_SECONDS = int(os.environ.get('VAYANA_TIMEOUT_SECONDS', '30'))
 # Backend-only provider selection; the frontend keeps one stable EWB endpoint.
 EWB_PROVIDER = os.environ.get('EWB_PROVIDER', 'cleartax').strip().lower()
 EWB_FALLBACK_PROVIDER = os.environ.get('EWB_FALLBACK_PROVIDER', '').strip().lower()
+PERIONE_BASE_URL = os.environ.get('PERIONE_BASE_URL', 'https://api.perione.in/v1').strip().rstrip('/')
+PERIONE_AUTH_PATH = os.environ.get('PERIONE_AUTH_PATH', '/authenticate').strip()
+PERIONE_EWB_PATH = os.environ.get('PERIONE_EWB_PATH', '/ewaybill').strip()
+PERIONE_GSTIN = os.environ.get('PERIONE_GSTIN', '').strip().upper()
+PERIONE_USERNAME = os.environ.get('PERIONE_USERNAME', '').strip()
+PERIONE_PASSWORD = os.environ.get('PERIONE_PASSWORD', '').strip()
+PERIONE_TOKEN = os.environ.get('PERIONE_TOKEN', '').strip()
+PERIONE_TIMEOUT_SECONDS = int(os.environ.get('PERIONE_TIMEOUT_SECONDS', '30'))
+_perione_token = {'token': '', 'expires_at': 0}
+_perione_token_lock = threading.Lock()
 
 _ewb_token = {'authtoken': '', 'sek': b'', 'expires_at': 0}
 _ewb_token_lock = threading.Lock()
@@ -670,6 +680,98 @@ def _ewb_normalize(details):
     }
 
 
+
+def _perione_configured():
+    return bool((PERIONE_TOKEN or (PERIONE_GSTIN and PERIONE_USERNAME and PERIONE_PASSWORD)) and requests is not None)
+
+
+def _perione_authenticate():
+    now = datetime.now(timezone.utc).timestamp()
+    with _perione_token_lock:
+        if PERIONE_TOKEN:
+            return PERIONE_TOKEN
+        if _perione_token['token'] and now < _perione_token['expires_at']:
+            return _perione_token['token']
+
+        response = requests.post(
+            PERIONE_BASE_URL + PERIONE_AUTH_PATH,
+            json={
+                'gstin': PERIONE_GSTIN,
+                'username': PERIONE_USERNAME,
+                'password': PERIONE_PASSWORD,
+            },
+            headers={'Content-Type': 'application/json', 'Accept': 'application/json'},
+            timeout=PERIONE_TIMEOUT_SECONDS,
+        )
+        response.raise_for_status()
+        body = response.json()
+        token = body.get('token') or (body.get('data') or {}).get('token')
+        if not token:
+            raise RuntimeError('PeriOne authentication response did not contain a token.')
+        expires_in = body.get('expires_in') or (body.get('data') or {}).get('expires_in') or 3600
+        _perione_token.update({'token': token, 'expires_at': now + max(300, float(expires_in) - 60)})
+        return token
+
+
+def _perione_get_details(ewb_no):
+    token = _perione_authenticate()
+    path = PERIONE_EWB_PATH.rstrip('/') + '/' + urllib.parse.quote(ewb_no, safe='')
+    response = requests.get(
+        PERIONE_BASE_URL + path,
+        headers={
+            'Authorization': 'Bearer ' + token,
+            'Accept': 'application/json',
+        },
+        timeout=PERIONE_TIMEOUT_SECONDS,
+    )
+    response.raise_for_status()
+    return response.json()
+
+
+def _perione_normalize(body):
+    details = body.get('data') if isinstance(body, dict) and isinstance(body.get('data'), dict) else body
+    if not isinstance(details, dict):
+        raise RuntimeError('PeriOne EWB response was not a JSON object.')
+    vehicles = (
+        details.get('VehiclListDetails')
+        or details.get('vehicleListDetails')
+        or details.get('vehicleUpdates')
+        or details.get('vehicle_updates')
+        or details.get('vehicles')
+        or []
+    )
+    if isinstance(vehicles, dict):
+        vehicles = [vehicles]
+    latest = vehicles[-1] if vehicles else {}
+
+    def first(*keys):
+        for source in (details, latest):
+            if not isinstance(source, dict):
+                continue
+            for key in keys:
+                value = source.get(key)
+                if value not in (None, ''):
+                    return value
+        return None
+
+    return {
+        'success': True,
+        'provider': 'perione',
+        'status': first('status', 'ewbStatus', 'ewayBillStatus'),
+        'ewbNo': first('ewbNo', 'ewayBillNo', 'ewaybill_no', 'ewayBillNumber'),
+        'vehicleNo': first('vehicleNo', 'vehicleNumber', 'vehicle_no'),
+        'fromPlace': first('fromPlace', 'from_place', 'from'),
+        'toPlace': first('toPlace', 'to_place', 'to'),
+        'actualDist': first('actualDist', 'actualDistance', 'distance_km', 'distance'),
+        'validUpto': first('validUpto', 'validUntil', 'valid_upto', 'validity'),
+        'lastUpdated': first('enteredDate', 'lastUpdated', 'updatedAt', 'ewayBillDate', 'ewaybill_date'),
+        'transporterName': first('transporterName', 'transporter_name'),
+        'transporterId': first('transporterId', 'transporter_id'),
+        'vehicleUpdates': vehicles,
+        'raw': details,
+    }
+
+
 def _ewb_provider_attempt(provider, ewb_no):
     """Run one provider adapter and return the dashboard's common EWB shape."""
     provider = (provider or '').strip().lower()
@@ -681,6 +783,10 @@ def _ewb_provider_attempt(provider, ewb_no):
         if not _vayana_configured():
             raise RuntimeError('Vayana is not configured.')
         return _vayana_normalize(_vayana_get_details(ewb_no))
+    if provider == 'perione':
+        if not _perione_configured():
+            raise RuntimeError('PeriOne is not configured.')
+        return _perione_normalize(_perione_get_details(ewb_no))
     if provider == 'nic':
         if not _ewb_configured():
             raise RuntimeError('NIC/GSTN E-Way Bill API is not configured.')
