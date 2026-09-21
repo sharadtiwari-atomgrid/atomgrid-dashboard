@@ -269,9 +269,38 @@ def _vayana_authenticate():
         token = data.get('token')
         associated = data.get('associatedOrgs') or []
         org_id = VAYANA_ORG_ID
+        org_source = 'env' if org_id else ''
         if not org_id and associated:
             org = associated[0].get('organisation') or {}
             org_id = org.get('id') or ''
+            if org_id:
+                org_source = 'associatedOrgs'
+
+        # Some Vayana deployments may embed the organisation identifier in
+        # the JWT even when associatedOrgs is empty. Decode only the payload
+        # to discover an org id; Vayana still validates the token signature.
+        if not org_id and isinstance(token, str) and token.count('.') == 2:
+            try:
+                jwt_payload = token.split('.')[1]
+                jwt_payload += '=' * (-len(jwt_payload) % 4)
+                claims = json.loads(base64.urlsafe_b64decode(jwt_payload.encode('ascii')).decode('utf-8'))
+                candidate_paths = [
+                    ('org_id', claims.get('org_id')),
+                    ('orgId', claims.get('orgId')),
+                    ('organisation_id', claims.get('organisation_id')),
+                    ('organisationId', claims.get('organisationId')),
+                ]
+                organisation = claims.get('organisation')
+                if isinstance(organisation, dict):
+                    candidate_paths.append(('organisation.id', organisation.get('id')))
+                for key, candidate in candidate_paths:
+                    if candidate:
+                        org_id = str(candidate).strip()
+                        org_source = 'jwt:' + key
+                        break
+            except Exception:
+                pass
+
         if not token or not org_id:
             missing_parts = []
             if not token:
@@ -279,10 +308,11 @@ def _vayana_authenticate():
             if not org_id:
                 missing_parts.append('organisation ID')
             app.logger.error(
-                'Vayana authentication response missing %s; data_keys=%s associated_orgs_count=%s',
+                'Vayana authentication response missing %s; data_keys=%s associated_orgs_count=%s jwt_org_source=%s',
                 ', '.join(missing_parts),
                 sorted(data.keys()) if isinstance(data, dict) else [],
                 len(associated) if isinstance(associated, list) else 0,
+                org_source or 'none',
             )
             raise RuntimeError(
                 'Vayana authentication succeeded but missing: ' + ', '.join(missing_parts) +
