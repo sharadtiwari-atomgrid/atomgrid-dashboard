@@ -141,7 +141,7 @@ h1{font-size:23px;margin:0 0 8px}p{margin:0 0 24px;color:#657084;font-size:14px;
 @app.before_request
 def require_auth():
     # Public endpoints needed for Render health checks and OAuth itself.
-    if request.path == '/health' or request.path.startswith('/auth/'):
+    if request.path in ('/health', '/api/vayana-config-status') or request.path.startswith('/auth/'):
         return None
     if session.get('user'):
         return None
