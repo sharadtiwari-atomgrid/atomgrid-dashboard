@@ -449,8 +449,29 @@ def ewaybill_details():
         try:
             return jsonify(_vayana_normalize(_vayana_get_details(ewb_no)))
         except requests.HTTPError as exc:
-            status = exc.response.status_code if exc.response is not None else 502
-            return jsonify(success=False, provider='vayana', error=f'Vayana EWB API returned HTTP {status}.'), 502
+            response = exc.response
+            status = response.status_code if response is not None else 502
+            vayana_error = None
+            if response is not None:
+                try:
+                    payload = response.json()
+                    if isinstance(payload, dict):
+                        vayana_error = payload.get('error') or payload.get('errorDetails') or payload.get('additionalInfo') or payload.get('message')
+                    else:
+                        vayana_error = str(payload)
+                except ValueError:
+                    vayana_error = (response.text or '').strip()[:2000]
+            app.logger.error(
+                'Vayana EWB HTTP error: status=%s body=%s',
+                status,
+                json.dumps(vayana_error, ensure_ascii=False) if isinstance(vayana_error, (dict, list)) else vayana_error
+            )
+            return jsonify(
+                success=False,
+                provider='vayana',
+                error=f'Vayana EWB API returned HTTP {status}.',
+                vayana_error=vayana_error,
+            ), 502
         except Exception as exc:
             app.logger.exception('Vayana EWB lookup failed for %s', ewb_no)
             return jsonify(success=False, provider='vayana', error=str(exc)), 502
