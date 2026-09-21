@@ -239,7 +239,18 @@ def _vayana_authenticate():
             timeout=VAYANA_TIMEOUT_SECONDS,
         )
         response.raise_for_status()
-        body = response.json()
+        try:
+            body = response.json()
+        except ValueError:
+            content_type = response.headers.get('Content-Type', '')
+            app.logger.error(
+                'Vayana authentication returned non-JSON: HTTP %s, Content-Type=%s, URL=%s',
+                response.status_code, content_type, response.url
+            )
+            raise RuntimeError(
+                f'Vayana authentication returned a non-JSON response (HTTP {response.status_code}, '
+                f'Content-Type: {content_type or "unknown"}). Check Vayana sandbox access/endpoint.'
+            )
         data = body.get('data') or {}
         token = data.get('token')
         associated = data.get('associatedOrgs') or []
@@ -259,8 +270,8 @@ def _vayana_get_details(ewb_no):
     token, org_id = _vayana_authenticate()
     url = VAYANA_BASE_URL + '/basic/eway/v3.0/' + urllib.parse.quote(VAYANA_EWB_PROVIDER, safe='') + '/v1.03/ewayapi/GetEwayBill'
     headers = {
-        'Content-Type': 'application/json',
-        'Accept': 'application/json',
+        'Content-Type': 'application/json; charset=UTF-8',
+        'Accept': 'application/json; charset=UTF-8',
         'X-FLYNN-N-ORG-ID': org_id,
         'X-FLYNN-N-USER-TOKEN': token,
         'X-FLYNN-N-EWB-GSP-CODE': VAYANA_EWB_GSP_CODE,
@@ -275,7 +286,18 @@ def _vayana_get_details(ewb_no):
         timeout=VAYANA_TIMEOUT_SECONDS,
     )
     response.raise_for_status()
-    body = response.json()
+    try:
+        body = response.json()
+    except ValueError:
+        content_type = response.headers.get('Content-Type', '')
+        app.logger.error(
+            'Vayana EWB API returned non-JSON: HTTP %s, Content-Type=%s, URL=%s',
+            response.status_code, content_type, response.url
+        )
+        raise RuntimeError(
+            f'Vayana EWB API returned a non-JSON response (HTTP {response.status_code}, '
+            f'Content-Type: {content_type or "unknown"}). Check sandbox/API access.'
+        )
     if str(body.get('status', '0')) != '1':
         error = body.get('error') or body.get('errorDetails') or body.get('additionalInfo') or body
         raise RuntimeError('Vayana EWB lookup failed: ' + json.dumps(error))
