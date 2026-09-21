@@ -376,6 +376,46 @@ def vayana_config_status():
     )
 
 
+@app.get('/api/vayana-ewb-diagnostic')
+def vayana_ewb_diagnostic():
+    """Safely test Vayana EWB provider routes without exposing credentials."""
+    ewb_no = ''.join(ch for ch in (request.args.get('ewb_no') or '152556544924').strip() if ch.isdigit())
+    if len(ewb_no) != 12:
+        return jsonify(success=False, error='E-Way Bill number must be a 12-digit number.'), 400
+    missing = _vayana_missing_config()
+    if missing:
+        return jsonify(success=False, configured=False, missing=missing), 503
+    try:
+        token, org_id = _vayana_authenticate()
+        headers = {
+            'Content-Type': 'application/json; charset=UTF-8',
+            'Accept': 'application/json; charset=UTF-8',
+            'X-FLYNN-N-ORG-ID': org_id,
+            'X-FLYNN-N-USER-TOKEN': token,
+            'X-FLYNN-N-EWB-GSP-CODE': VAYANA_EWB_GSP_CODE,
+            'X-FLYNN-N-EWB-GSTIN': VAYANA_EWB_GSTIN,
+            'X-FLYNN-N-EWB-USERNAME': VAYANA_EWB_USERNAME,
+            'X-FLYNN-N-EWB-PWD': VAYANA_EWB_PASSWORD,
+        }
+        results=[]
+        for provider in ('ew1','ew2'):
+            url = VAYANA_BASE_URL + '/basic/eway/v3.0/' + provider + '/v1.03/ewayapi/GetEwayBill'
+            try:
+                resp=requests.get(url, params={'ewbNo':ewb_no}, headers=headers, timeout=VAYANA_TIMEOUT_SECONDS)
+                body=None
+                try: body=resp.json()
+                except ValueError: body=(resp.text or '')[:1000]
+                results.append({'provider':provider,'status_code':resp.status_code,'url':url,'body':body})
+            except Exception as exc:
+                results.append({'provider':provider,'status_code':None,'url':url,'error':str(exc)})
+        return jsonify(success=True, authenticated=True, baseUrl=VAYANA_BASE_URL, ewbNo=ewb_no, providers=results)
+    except requests.HTTPError as exc:
+        return jsonify(success=False, stage='authentication', status_code=exc.response.status_code if exc.response is not None else 502), 502
+    except Exception as exc:
+        app.logger.exception('Vayana EWB diagnostic failed')
+        return jsonify(success=False, stage='authentication', error=str(exc)), 502
+
+
 @app.get('/api/vayana-test')
 def vayana_test():
     missing = _vayana_missing_config()
