@@ -25,10 +25,13 @@ except ImportError:  # pragma: no cover
 
 try:
     import requests
+except ImportError:  # pragma: no cover
+    requests = None
+
+try:
     from google.auth.transport import requests as google_requests
     from google.oauth2 import id_token
 except ImportError:  # pragma: no cover
-    requests = None
     google_requests = None
     id_token = None
 
@@ -186,15 +189,22 @@ def logout():
 DEFAULT_PUBLISHED_CSV_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vRexCOYViGE7Jk8t95Yr7t_NaxZcyrZzguKD9hN6MBRHcONsneckfFMpOki6xYlHFE3Evx8CdbTZz_R/pub?gid=0&single=true&output=csv'
 
 
+def _vayana_missing_config():
+    values = {
+        'VAYANA_EMAIL': VAYANA_EMAIL,
+        'VAYANA_PASSWORD': VAYANA_PASSWORD,
+        'VAYANA_EWB_GSTIN': VAYANA_EWB_GSTIN,
+        'VAYANA_EWB_USERNAME': VAYANA_EWB_USERNAME,
+        'VAYANA_EWB_PASSWORD': VAYANA_EWB_PASSWORD,
+    }
+    missing = [key for key, value in values.items() if not value]
+    if requests is None:
+        missing.append('python requests package')
+    return missing
+
+
 def _vayana_configured():
-    return bool(
-        requests
-        and VAYANA_EMAIL
-        and VAYANA_PASSWORD
-        and VAYANA_EWB_GSTIN
-        and VAYANA_EWB_USERNAME
-        and VAYANA_EWB_PASSWORD
-    )
+    return not _vayana_missing_config()
 
 
 def _ewb_configured():
@@ -325,10 +335,29 @@ def _vayana_normalize(details):
     }
 
 
+@app.get('/api/vayana-config-status')
+def vayana_config_status():
+    missing = _vayana_missing_config()
+    return jsonify(
+        success=not missing,
+        configured=not missing,
+        missing=missing,
+        variables={
+            'VAYANA_EMAIL': bool(VAYANA_EMAIL),
+            'VAYANA_PASSWORD': bool(VAYANA_PASSWORD),
+            'VAYANA_EWB_GSTIN': bool(VAYANA_EWB_GSTIN),
+            'VAYANA_EWB_USERNAME': bool(VAYANA_EWB_USERNAME),
+            'VAYANA_EWB_PASSWORD': bool(VAYANA_EWB_PASSWORD),
+            'requests_package': requests is not None,
+        },
+    )
+
+
 @app.get('/api/vayana-test')
 def vayana_test():
-    if not _vayana_configured():
-        return jsonify(success=False, configured=False, error='Vayana credentials are not configured on the Render backend.'), 503
+    missing = _vayana_missing_config()
+    if missing:
+        return jsonify(success=False, configured=False, error='Vayana configuration is incomplete.', missing=missing), 503
     try:
         token, org_id = _vayana_authenticate()
         return jsonify(success=True, provider='vayana', organisationId=org_id, tokenConfigured=bool(token))
