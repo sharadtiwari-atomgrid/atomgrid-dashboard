@@ -79,6 +79,9 @@ VAYANA_EWB_PASSWORD = os.environ.get('VAYANA_EWB_PASSWORD', '').strip()
 VAYANA_EWB_GSP_CODE = os.environ.get('VAYANA_EWB_GSP_CODE', 'vay').strip()
 VAYANA_EWB_PROVIDER = os.environ.get('VAYANA_EWB_PROVIDER', 'ew1').strip()
 VAYANA_TIMEOUT_SECONDS = int(os.environ.get('VAYANA_TIMEOUT_SECONDS', '30'))
+# Backend-only provider selection; the frontend keeps one stable EWB endpoint.
+EWB_PROVIDER = os.environ.get('EWB_PROVIDER', 'cleartax').strip().lower()
+EWB_FALLBACK_PROVIDER = os.environ.get('EWB_FALLBACK_PROVIDER', '').strip().lower()
 
 _ewb_token = {'authtoken': '', 'sek': b'', 'expires_at': 0}
 _ewb_token_lock = threading.Lock()
@@ -667,41 +670,76 @@ def _ewb_normalize(details):
     }
 
 
+def _ewb_provider_attempt(provider, ewb_no):
+    """Run one provider adapter and return the dashboard's common EWB shape."""
+    provider = (provider or '').strip().lower()
+    if provider == 'cleartax':
+        if not _cleartax_configured():
+            raise RuntimeError('ClearTax is not configured.')
+        return _cleartax_normalize(_cleartax_get_details(ewb_no))
+    if provider == 'vayana':
+        if not _vayana_configured():
+            raise RuntimeError('Vayana is not configured.')
+        return _vayana_normalize(_vayana_get_details(ewb_no))
+    if provider == 'nic':
+        if not _ewb_configured():
+            raise RuntimeError('NIC/GSTN E-Way Bill API is not configured.')
+        return _ewb_normalize(_ewb_get_details(ewb_no))
+    raise RuntimeError('Unsupported E-Way Bill provider: ' + (provider || '(empty)'))
+
+
+def _ewb_provider_candidates():
+    candidates = []
+    for provider in (EWB_PROVIDER, EWB_FALLBACK_PROVIDER):
+        provider = (provider or '').strip().lower()
+        if provider and provider not in candidates:
+            candidates.append(provider)
+    return candidates or ['cleartax']
+
+
+@app.get('/api/ewaybill-provider-status')
+def ewaybill_provider_status():
+    """Safe diagnostics: reports configured providers without exposing credentials."""
+    statuses = {
+        'cleartax': _cleartax_configured(),
+        'vayana': _vayana_configured(),
+        'nic': _ewb_configured(),
+    }
+    return jsonify(
+        success=True,
+        activeProvider=EWB_PROVIDER,
+        fallbackProvider=EWB_FALLBACK_PROVIDER or None,
+        configured=statuses,
+    )
+
+
 @app.get('/api/ewaybill-details')
 def ewaybill_details():
     ewb_no = ''.join(ch for ch in (request.args.get('ewb_no') or '').strip() if ch.isdigit())
     if len(ewb_no) != 12:
         return jsonify(success=False, error='E-Way Bill number must be a 12-digit number.'), 400
-    if _cleartax_configured():
-        try:
-            return jsonify(_cleartax_normalize(_cleartax_get_details(ewb_no)))
-        except Exception as exc:
-            app.logger.exception('ClearTax EWB lookup failed for %s', ewb_no)
-            return jsonify(success=False, provider='cleartax', error=str(exc)), 502
 
-    if _vayana_configured():
+    attempts = []
+    for provider in _ewb_provider_candidates():
         try:
-            return jsonify(_vayana_normalize(_vayana_get_details(ewb_no)))
+            result = _ewb_provider_attempt(provider, ewb_no)
+            result['provider'] = provider
+            return jsonify(result)
         except requests.HTTPError as exc:
             response = exc.response
             status = response.status_code if response is not None else 502
-            return jsonify(success=False, provider='vayana', error=f'Vayana EWB API returned HTTP {status}.'), 502
+            attempts.append({'provider': provider, 'status': status, 'error': 'HTTP ' + str(status)})
+            app.logger.warning('EWB provider %s failed for %s with HTTP %s', provider, ewb_no, status)
         except Exception as exc:
-            app.logger.exception('Vayana EWB lookup failed for %s', ewb_no)
-            return jsonify(success=False, provider='vayana', error=str(exc)), 502
+            attempts.append({'provider': provider, 'error': str(exc)})
+            app.logger.warning('EWB provider %s failed for %s: %s', provider, ewb_no, exc)
 
-    if not _ewb_configured():
-        missing = _vayana_missing_config()
-        app.logger.error('Vayana configuration incomplete. Missing: %s', ', '.join(missing) if missing else 'unknown')
-        return jsonify(success=False, configured=False, error='No E-Way Bill provider is configured. Add ClearTax API credentials to enable EWB lookup.', missing=missing), 503
-    try:
-        return jsonify(_ewb_normalize(_ewb_get_details(ewb_no)))
-    except requests.HTTPError as exc:
-        status = exc.response.status_code if exc.response is not None else 502
-        return jsonify(success=False, error=f'E-Way Bill API returned HTTP {status}.'), 502
-    except Exception as exc:
-        app.logger.exception('E-Way Bill lookup failed for %s', ewb_no)
-        return jsonify(success=False, error=str(exc)), 502
+    return jsonify(
+        success=False,
+        provider=EWB_PROVIDER,
+        error='All configured E-Way Bill providers failed.',
+        attempts=attempts,
+    ), 502
 
 
 @app.get('/api/sheet-csv')
