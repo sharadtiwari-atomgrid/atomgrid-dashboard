@@ -273,7 +273,21 @@ def _vayana_authenticate():
             org = associated[0].get('organisation') or {}
             org_id = org.get('id') or ''
         if not token or not org_id:
-            raise RuntimeError('Vayana authentication succeeded but token or organisation ID was not returned.')
+            missing_parts = []
+            if not token:
+                missing_parts.append('token')
+            if not org_id:
+                missing_parts.append('organisation ID')
+            app.logger.error(
+                'Vayana authentication response missing %s; data_keys=%s associated_orgs_count=%s',
+                ', '.join(missing_parts),
+                sorted(data.keys()) if isinstance(data, dict) else [],
+                len(associated) if isinstance(associated, list) else 0,
+            )
+            raise RuntimeError(
+                'Vayana authentication succeeded but missing: ' + ', '.join(missing_parts) +
+                '. Check that the Vayana user is linked to an active organisation.'
+            )
         expiry = data.get('expiry')
         expires_at = float(expiry) if expiry else now + (350 * 60)
         _vayana_token.update({'token': token, 'org_id': org_id, 'expires_at': expires_at})
@@ -433,7 +447,12 @@ def vayana_test():
         return jsonify(success=False, configured=False, error='Vayana configuration is incomplete.', missing=missing), 503
     try:
         token, org_id = _vayana_authenticate()
-        return jsonify(success=True, provider='vayana', organisationId=org_id, tokenConfigured=bool(token))
+        return jsonify(
+            success=True,
+            provider='vayana',
+            organisationId=org_id,
+            tokenConfigured=bool(token),
+        )
     except requests.HTTPError as exc:
         status = exc.response.status_code if exc.response is not None else 502
         return jsonify(success=False, provider='vayana', error=f'Vayana authentication returned HTTP {status}.'), 502
