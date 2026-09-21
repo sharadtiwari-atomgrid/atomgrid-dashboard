@@ -252,6 +252,10 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
   tbody tr{cursor:pointer;}
   @media(max-width:700px){.detail-grid{grid-template-columns:1fr}.quick-search input{min-width:0}}
   @media(max-width:980px){ .kpis{grid-template-columns:repeat(2,1fr);} .grid,.grid3{grid-template-columns:1fr;} }
+
+.ewb-panel{margin-top:16px}.ewb-head{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}.ewb-actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.ewb-actions input{min-width:220px;padding:8px 10px;border:1px solid var(--line);border-radius:6px}.ewb-kpis{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin:12px 0}.ewb-kpi{padding:10px 12px;border:1px solid var(--line);border-radius:8px;background:#fff}.ewb-kpi b{display:block;font-size:18px}.ewb-kpi span{font-size:11px;color:var(--muted)}.ewb-table-wrap{overflow:auto}.ewb-table{width:100%;border-collapse:collapse;min-width:1050px}.ewb-table th,.ewb-table td{padding:9px 8px;border-bottom:1px solid var(--line);text-align:left;font-size:12px}.ewb-pill{display:inline-block;padding:3px 7px;border-radius:999px;background:#eef6f3;font-weight:700}.ewb-status{font-weight:700}.ewb-muted{color:var(--muted)}.ewb-error{padding:10px;border-radius:7px;background:#fff4f2;color:#9b2c20;margin:8px 0}.ewb-updates{font-size:11px;line-height:1.5}.ewb-refresh-note{font-size:11px;color:var(--muted)}
+@media(max-width:800px){.ewb-kpis{grid-template-columns:repeat(2,minmax(0,1fr))}}
+
 </style>
 </head>
 <body>
@@ -423,6 +427,36 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
       </table>
     </div>
   </section>
+
+
+  <section class="panel ewb-panel" id="ewaybillTrackingPanel">
+    <div class="ewb-head">
+      <div>
+        <h3 style="margin-bottom:3px;">E-Way Bill Tracking</h3>
+        <div class="count-note">EWB movement updates from Vayana · not continuous GPS</div>
+      </div>
+      <div class="ewb-actions">
+        <input id="ewbSearchInput" type="text" inputmode="numeric" placeholder="Enter E-Way Bill number">
+        <button type="button" class="secondary" id="ewbLookupBtn">Lookup</button>
+        <button type="button" class="secondary" id="ewbRefreshBtn">Refresh</button>
+      </div>
+    </div>
+    <div class="ewb-refresh-note" id="ewbRefreshNote">Enter an EWB number to retrieve live EWB details.</div>
+    <div class="ewb-error" id="ewbError" style="display:none;"></div>
+    <div class="ewb-kpis" id="ewbKpis">
+      <div class="ewb-kpi"><b id="ewbKpiCount">0</b><span>EWBs loaded</span></div>
+      <div class="ewb-kpi"><b id="ewbKpiVehicles">0</b><span>Vehicle updates</span></div>
+      <div class="ewb-kpi"><b id="ewbKpiValid">—</b><span>Latest validity</span></div>
+      <div class="ewb-kpi"><b id="ewbKpiUpdated">—</b><span>Last EWB update</span></div>
+    </div>
+    <div class="ewb-table-wrap">
+      <table class="ewb-table">
+        <thead><tr><th>Job</th><th>EWB</th><th>Vehicle</th><th>Status</th><th>From</th><th>To</th><th>Distance</th><th>Validity</th><th>Transporter</th><th>Latest Vehicle Update</th></tr></thead>
+        <tbody id="ewbTrackingBody"><tr><td colspan="10" class="empty-state">No EWB lookup yet.</td></tr></tbody>
+      </table>
+    </div>
+  </section>
+
 
   <div class="grid3">
     <div class="panel">
@@ -598,6 +632,14 @@ const COLUMN_MAP = {
   'transport payment status': 'payment_status',
   'tax invoice': 'tax_invoice_doc',
   'e-way bill': 'eway_doc',
+  'e-way bill no': 'ewb_no',
+  'e-way bill number': 'ewb_no',
+  'eway bill no': 'ewb_no',
+  'eway bill number': 'ewb_no',
+  'ewb no': 'ewb_no',
+  'ewb number': 'ewb_no',
+  'vehicle no': 'vehicle_no',
+  'vehicle number': 'vehicle_no',
   'coa': 'coa_doc',
   'transport doc no': 'transport_doc',
   'pod': 'pod_doc',
@@ -755,6 +797,8 @@ function rowsToRecords(rows, dateFmt, headerMode){
       has_eway: docPresent(rec.eway_doc),
       has_coa: docPresent(rec.coa_doc),
       has_pod: docPresent(rec.pod_doc),
+      ewb_no: String(rec.ewb_no||'').trim(),
+      vehicle_no: String(rec.vehicle_no||'').trim(),
       flagged: FLAG_PATTERN.test(remark),
       remark: String(remark).trim(),
       movement_type: String(rec.movement_type||'').trim()
@@ -1574,6 +1618,43 @@ function applyFilters(){
   document.querySelectorAll('#tableBody tr[data-job]').forEach(tr=>tr.addEventListener('click',()=>openShipmentDetail(tr.dataset.job)));
 }
 
+
+
+let ewbCache = {};
+function ewbEsc(v){return String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
+function ewbExpiryState(v){if(!v)return '—';const d=new Date(v);if(isNaN(d))return ewbEsc(v);return d.toLocaleString('en-IN',{dateStyle:'medium',timeStyle:'short'});}
+function ewbLatestUpdate(d){const u=Array.isArray(d?.vehicleUpdates)?d.vehicleUpdates:d?.vehicleUpdates?.VehiclListDetails||[];if(!u.length)return '—';const x=u[u.length-1]||{};return x.enteredDate||x.entered_date||x.updatedAt||x.updated_at||'—';}
+function ewbRender(results){
+  const body=document.getElementById('ewbTrackingBody');if(!body)return;
+  const rows=Array.isArray(results)?results:[results];
+  document.getElementById('ewbKpiCount').textContent=rows.length;
+  document.getElementById('ewbKpiVehicles').textContent=rows.reduce((n,x)=>n+(Array.isArray(x?.vehicleUpdates)?x.vehicleUpdates.length:0),0);
+  const first=rows.find(Boolean)||{};
+  document.getElementById('ewbKpiValid').textContent=first.validUpto?ewbExpiryState(first.validUpto):'—';
+  document.getElementById('ewbKpiUpdated').textContent=first.lastUpdated||ewbLatestUpdate(first)||'—';
+  if(!rows.length){body.innerHTML='<tr><td colspan="10" class="empty-state">No EWB details available.</td></tr>';return;}
+  body.innerHTML=rows.map(x=>{const u=Array.isArray(x.vehicleUpdates)?x.vehicleUpdates:[];const last=u.length?u[u.length-1]:null;return '<tr><td>'+ewbEsc(x.job||'—')+'</td><td><b>'+ewbEsc(x.ewbNo||'—')+'</b></td><td>'+ewbEsc(x.vehicleNo||(last&&last.vehicleNo)||'—')+'</td><td><span class="ewb-pill ewb-status">'+ewbEsc(x.status||'—')+'</span></td><td>'+ewbEsc(x.fromPlace||'—')+'</td><td>'+ewbEsc(x.toPlace||'—')+'</td><td>'+ewbEsc(x.actualDist||'—')+'</td><td>'+ewbExpiryState(x.validUpto)+'</td><td>'+ewbEsc(x.transporterName||'—')+'</td><td class="ewb-updates">'+ewbEsc(ewbLatestUpdate(x))+'</td></tr>';}).join('');
+}
+async function ewbLookup(no){
+  const ewb=String(no||'').trim();if(!ewb)return;
+  const err=document.getElementById('ewbError'),note=document.getElementById('ewbRefreshNote');
+  err.style.display='none';note.textContent='Fetching EWB '+ewb+' from Vayana…';
+  try{
+    const res=await fetch('/api/ewaybill-details?ewb_no='+encodeURIComponent(ewb),{credentials:'same-origin'});
+    const data=await res.json();
+    if(!res.ok||!data.success)throw new Error(data.error||data.message||('EWB lookup failed ('+res.status+')'));
+    const result=Object.assign({},data,{job:(allRecords.find(r=>String(r.ewb_no)===ewb)||{}).job||''});
+    ewbCache[ewb]=result;ewbRender(Object.values(ewbCache));note.textContent='Last lookup: '+new Date().toLocaleString('en-IN')+' · Vayana';
+  }catch(e){err.textContent=e.message||'EWB lookup failed';err.style.display='block';note.textContent='EWB lookup failed. Check credentials/access or sandbox availability.';}
+}
+function bindEwbTracking(){
+  const input=document.getElementById('ewbSearchInput'),btn=document.getElementById('ewbLookupBtn'),refresh=document.getElementById('ewbRefreshBtn');
+  if(!input||!btn)return;
+  btn.addEventListener('click',()=>ewbLookup(input.value));
+  input.addEventListener('keydown',e=>{if(e.key==='Enter')ewbLookup(input.value);});
+  refresh.addEventListener('click',()=>{const keys=Object.keys(ewbCache);if(keys.length)keys.forEach(k=>ewbLookup(k));else ewbLookup(input.value);});
+}
+bindEwbTracking();
 
 // ---------------------------------------------------------------
 bindInteractiveControls();
