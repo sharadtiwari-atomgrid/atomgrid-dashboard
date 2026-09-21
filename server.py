@@ -456,7 +456,9 @@ def ewaybill_details():
             return jsonify(success=False, provider='vayana', error=str(exc)), 502
 
     if not _ewb_configured():
-        return jsonify(success=False, configured=False, error='Vayana EWB credentials are not configured on the Render backend.'), 503
+        missing = _vayana_missing_config()
+        app.logger.error('Vayana configuration incomplete. Missing: %s', ', '.join(missing) if missing else 'unknown')
+        return jsonify(success=False, configured=False, error='Vayana EWB configuration is incomplete.', missing=missing), 503
     try:
         return jsonify(_ewb_normalize(_ewb_get_details(ewb_no)))
     except requests.HTTPError as exc:
