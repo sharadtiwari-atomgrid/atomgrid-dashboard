@@ -58,9 +58,23 @@ EWB_USERNAME = os.environ.get('EWB_USERNAME', '').strip()
 EWB_PASSWORD = os.environ.get('EWB_PASSWORD', '').strip()
 EWB_PUBLIC_KEY = os.environ.get('EWB_PUBLIC_KEY', '').strip()
 EWB_TIMEOUT_SECONDS = int(os.environ.get('EWB_TIMEOUT_SECONDS', '30'))
+VAYANA_BASE_URL = os.environ.get('VAYANA_BASE_URL', 'https://solo.enriched-api.vayana.com').strip().rstrip('/')
+VAYANA_AUTH_URL = os.environ.get('VAYANA_AUTH_URL', 'https://sandbox.services.vayananet.com/theodore/apis/v1/authtokens').strip().rstrip('/')
+VAYANA_EMAIL = os.environ.get('VAYANA_EMAIL', '').strip()
+VAYANA_PASSWORD = os.environ.get('VAYANA_PASSWORD', '').strip()
+VAYANA_ORG_ID = os.environ.get('VAYANA_ORG_ID', '').strip()
+VAYANA_USER_TOKEN = os.environ.get('VAYANA_USER_TOKEN', '').strip()
+VAYANA_EWB_GSTIN = os.environ.get('VAYANA_EWB_GSTIN', '').strip().upper()
+VAYANA_EWB_USERNAME = os.environ.get('VAYANA_EWB_USERNAME', '').strip()
+VAYANA_EWB_PASSWORD = os.environ.get('VAYANA_EWB_PASSWORD', '').strip()
+VAYANA_EWB_GSP_CODE = os.environ.get('VAYANA_EWB_GSP_CODE', 'vay').strip()
+VAYANA_EWB_PROVIDER = os.environ.get('VAYANA_EWB_PROVIDER', 'ew1').strip()
+VAYANA_TIMEOUT_SECONDS = int(os.environ.get('VAYANA_TIMEOUT_SECONDS', '30'))
 
 _ewb_token = {'authtoken': '', 'sek': b'', 'expires_at': 0}
 _ewb_token_lock = threading.Lock()
+_vayana_token = {'token': '', 'org_id': '', 'expires_at': 0}
+_vayana_token_lock = threading.Lock()
 
 app.secret_key = SESSION_SECRET or secrets.token_hex(32)
 app.config.update(
@@ -172,6 +186,17 @@ def logout():
 DEFAULT_PUBLISHED_CSV_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vRexCOYViGE7Jk8t95Yr7t_NaxZcyrZzguKD9hN6MBRHcONsneckfFMpOki6xYlHFE3Evx8CdbTZz_R/pub?gid=0&single=true&output=csv'
 
 
+def _vayana_configured():
+    return bool(
+        requests
+        and VAYANA_EMAIL
+        and VAYANA_PASSWORD
+        and VAYANA_EWB_GSTIN
+        and VAYANA_EWB_USERNAME
+        and VAYANA_EWB_PASSWORD
+    )
+
+
 def _ewb_configured():
     return all([EWB_API_BASE_URL, EWB_CLIENT_ID, EWB_CLIENT_SECRET, EWB_GSTIN, EWB_USERNAME, EWB_PASSWORD, EWB_PUBLIC_KEY]) and bool(Cipher and serialization and padding)
 
@@ -194,6 +219,103 @@ def _rsa_encrypt_base64(data_b64_text):
         public_key = serialization.load_der_public_key(base64.b64decode(key_text))
     encrypted = public_key.encrypt(data_b64_text.encode('utf-8'), padding.PKCS1v15())
     return base64.b64encode(encrypted).decode('ascii')
+
+
+def _vayana_authenticate():
+    now = datetime.now(timezone.utc).timestamp()
+    with _vayana_token_lock:
+        if _vayana_token['token'] and now < _vayana_token['expires_at']:
+            return _vayana_token['token'], _vayana_token['org_id']
+
+        response = requests.post(
+            VAYANA_AUTH_URL + '/authtokens',
+            json={
+                'handle': VAYANA_EMAIL,
+                'password': VAYANA_PASSWORD,
+                'handleType': 'email',
+                'tokenDurationInMins': 360,
+            },
+            headers={'Content-Type': 'application/json', 'Accept': 'application/json'},
+            timeout=VAYANA_TIMEOUT_SECONDS,
+        )
+        response.raise_for_status()
+        body = response.json()
+        data = body.get('data') or {}
+        token = data.get('token')
+        associated = data.get('associatedOrgs') or []
+        org_id = VAYANA_ORG_ID
+        if not org_id and associated:
+            org = associated[0].get('organisation') or {}
+            org_id = org.get('id') or ''
+        if not token or not org_id:
+            raise RuntimeError('Vayana authentication succeeded but token or organisation ID was not returned.')
+        expiry = data.get('expiry')
+        expires_at = float(expiry) if expiry else now + (350 * 60)
+        _vayana_token.update({'token': token, 'org_id': org_id, 'expires_at': expires_at})
+        return token, org_id
+
+
+def _vayana_get_details(ewb_no):
+    token, org_id = _vayana_authenticate()
+    url = VAYANA_BASE_URL + '/basic/eway/v3.0/' + urllib.parse.quote(VAYANA_EWB_PROVIDER, safe='') + '/v1.03/ewayapi/GetEwayBill'
+    headers = {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json',
+        'X-FLYNN-N-ORG-ID': org_id,
+        'X-FLYNN-N-USER-TOKEN': token,
+        'X-FLYNN-N-EWB-GSP-CODE': VAYANA_EWB_GSP_CODE,
+        'X-FLYNN-N-EWB-GSTIN': VAYANA_EWB_GSTIN,
+        'X-FLYNN-N-EWB-USERNAME': VAYANA_EWB_USERNAME,
+        'X-FLYNN-N-EWB-PWD': VAYANA_EWB_PASSWORD,
+    }
+    response = requests.get(
+        url,
+        params={'ewbNo': ewb_no},
+        headers=headers,
+        timeout=VAYANA_TIMEOUT_SECONDS,
+    )
+    response.raise_for_status()
+    body = response.json()
+    if str(body.get('status', '0')) != '1':
+        error = body.get('error') or body.get('errorDetails') or body.get('additionalInfo') or body
+        raise RuntimeError('Vayana EWB lookup failed: ' + json.dumps(error))
+    return body.get('data') or body
+
+
+def _vayana_normalize(details):
+    vehicles = details.get('VehiclListDetails') or details.get('vehicleListDetails') or []
+    latest_vehicle = vehicles[-1] if vehicles else {}
+    return {
+        'success': True,
+        'provider': 'vayana',
+        'status': details.get('status'),
+        'ewbNo': details.get('ewbNo') or details.get('EwbNo') or details.get('ewayBillNo'),
+        'vehicleNo': latest_vehicle.get('vehicleNo') or details.get('vehicleNo'),
+        'fromPlace': latest_vehicle.get('fromPlace') or details.get('fromPlace'),
+        'toPlace': details.get('toPlace'),
+        'actualDist': details.get('actualDist'),
+        'validUpto': details.get('validUpto'),
+        'lastUpdated': latest_vehicle.get('enteredDate') or details.get('ewayBillDate'),
+        'transporterName': details.get('transporterName'),
+        'transporterId': details.get('transporterId'),
+        'vehicleUpdates': vehicles,
+        'raw': details,
+    }
+
+
+@app.get('/api/vayana-test')
+def vayana_test():
+    if not _vayana_configured():
+        return jsonify(success=False, configured=False, error='Vayana credentials are not configured on the Render backend.'), 503
+    try:
+        token, org_id = _vayana_authenticate()
+        return jsonify(success=True, provider='vayana', organisationId=org_id, tokenConfigured=bool(token))
+    except requests.HTTPError as exc:
+        status = exc.response.status_code if exc.response is not None else 502
+        return jsonify(success=False, provider='vayana', error=f'Vayana authentication returned HTTP {status}.'), 502
+    except Exception as exc:
+        app.logger.exception('Vayana authentication test failed')
+        return jsonify(success=False, provider='vayana', error=str(exc)), 502
 
 
 def _ewb_authenticate():
@@ -272,8 +394,18 @@ def ewaybill_details():
     ewb_no = ''.join(ch for ch in (request.args.get('ewb_no') or '').strip() if ch.isdigit())
     if len(ewb_no) != 12:
         return jsonify(success=False, error='E-Way Bill number must be a 12-digit number.'), 400
+    if _vayana_configured():
+        try:
+            return jsonify(_vayana_normalize(_vayana_get_details(ewb_no)))
+        except requests.HTTPError as exc:
+            status = exc.response.status_code if exc.response is not None else 502
+            return jsonify(success=False, provider='vayana', error=f'Vayana EWB API returned HTTP {status}.'), 502
+        except Exception as exc:
+            app.logger.exception('Vayana EWB lookup failed for %s', ewb_no)
+            return jsonify(success=False, provider='vayana', error=str(exc)), 502
+
     if not _ewb_configured():
-        return jsonify(success=False, configured=False, error='E-Way Bill API is not configured on the Render backend.'), 503
+        return jsonify(success=False, configured=False, error='Vayana EWB credentials are not configured on the Render backend.'), 503
     try:
         return jsonify(_ewb_normalize(_ewb_get_details(ewb_no)))
     except requests.HTTPError as exc:
