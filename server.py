@@ -791,7 +791,7 @@ def _ewb_provider_attempt(provider, ewb_no):
         if not _ewb_configured():
             raise RuntimeError('NIC/GSTN E-Way Bill API is not configured.')
         return _ewb_normalize(_ewb_get_details(ewb_no))
-    raise RuntimeError('Unsupported E-Way Bill provider: ' + (provider || '(empty)'))
+    raise RuntimeError('Unsupported E-Way Bill provider: ' + (provider or '(empty)'))
 
 
 def _ewb_provider_candidates():
