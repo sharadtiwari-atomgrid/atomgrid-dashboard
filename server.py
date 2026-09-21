@@ -207,6 +207,7 @@ def _cleartax_get_details(ewb_no):
         params={'ewb_number': ewb_no},
         headers={
             'X-Cleartax-Auth-Token': CLEARTAX_AUTH_TOKEN,
+            'x-cleartax-product': 'EInvoice',
             'gstin': CLEARTAX_GSTIN,
             'Accept': 'application/json',
         },
