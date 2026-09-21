@@ -278,7 +278,6 @@ def _vayana_authenticate():
 
 def _vayana_get_details(ewb_no):
     token, org_id = _vayana_authenticate()
-    url = VAYANA_BASE_URL + '/basic/eway/v3.0/' + urllib.parse.quote(VAYANA_EWB_PROVIDER, safe='') + '/v1.03/ewayapi/GetEwayBill'
     headers = {
         'Content-Type': 'application/json; charset=UTF-8',
         'Accept': 'application/json; charset=UTF-8',
@@ -289,29 +288,53 @@ def _vayana_get_details(ewb_no):
         'X-FLYNN-N-EWB-USERNAME': VAYANA_EWB_USERNAME,
         'X-FLYNN-N-EWB-PWD': VAYANA_EWB_PASSWORD,
     }
-    response = requests.get(
-        url,
-        params={'ewbNo': ewb_no},
-        headers=headers,
-        timeout=VAYANA_TIMEOUT_SECONDS,
-    )
-    response.raise_for_status()
-    try:
-        body = response.json()
-    except ValueError:
-        content_type = response.headers.get('Content-Type', '')
-        app.logger.error(
-            'Vayana EWB API returned non-JSON: HTTP %s, Content-Type=%s, URL=%s',
-            response.status_code, content_type, response.url
+
+    # Vayana documents both ew1 and ew2 as valid EWB providers. If the
+    # configured provider returns a route-level 404, retry the alternate
+    # provider before treating it as a hard failure.
+    providers = [VAYANA_EWB_PROVIDER]
+    alternate = 'ew2' if VAYANA_EWB_PROVIDER == 'ew1' else 'ew1'
+    if alternate not in providers:
+        providers.append(alternate)
+
+    last_response = None
+    for provider in providers:
+        url = VAYANA_BASE_URL + '/basic/eway/v3.0/' + urllib.parse.quote(provider, safe='') + '/v1.03/ewayapi/GetEwayBill'
+        response = requests.get(
+            url,
+            params={'ewbNo': ewb_no},
+            headers=headers,
+            timeout=VAYANA_TIMEOUT_SECONDS,
         )
-        raise RuntimeError(
-            f'Vayana EWB API returned a non-JSON response (HTTP {response.status_code}, '
-            f'Content-Type: {content_type or "unknown"}). Check sandbox/API access.'
-        )
-    if str(body.get('status', '0')) != '1':
-        error = body.get('error') or body.get('errorDetails') or body.get('additionalInfo') or body
-        raise RuntimeError('Vayana EWB lookup failed: ' + json.dumps(error))
-    return body.get('data') or body
+        last_response = response
+        if response.status_code == 404 and provider != providers[-1]:
+            app.logger.warning(
+                'Vayana EWB provider %s returned HTTP 404; retrying with provider %s',
+                provider, providers[-1]
+            )
+            continue
+        response.raise_for_status()
+        try:
+            body = response.json()
+        except ValueError:
+            content_type = response.headers.get('Content-Type', '')
+            app.logger.error(
+                'Vayana EWB API returned non-JSON: HTTP %s, Content-Type=%s, URL=%s',
+                response.status_code, content_type, response.url
+            )
+            raise RuntimeError(
+                f'Vayana EWB API returned a non-JSON response (HTTP {response.status_code}, '
+                f'Content-Type: {content_type or "unknown"}). Check sandbox/API access.'
+            )
+        if str(body.get('status', '0')) != '1':
+            error = body.get('error') or body.get('errorDetails') or body.get('additionalInfo') or body
+            raise RuntimeError('Vayana EWB lookup failed: ' + json.dumps(error))
+        return body.get('data') or body
+
+    # Defensive fallback if all provider routes return 404.
+    if last_response is not None:
+        last_response.raise_for_status()
+    raise RuntimeError('Vayana EWB lookup failed: no provider response.')
 
 
 def _vayana_normalize(details):
