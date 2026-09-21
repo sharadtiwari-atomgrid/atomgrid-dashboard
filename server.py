@@ -237,8 +237,12 @@ def _vayana_authenticate():
         if _vayana_token['token'] and now < _vayana_token['expires_at']:
             return _vayana_token['token'], _vayana_token['org_id']
 
+        # Vayana documents the authentication base as .../theodore/apis/v1
+        # and the actual login route as /authtokens. Support either form in
+        # Render so a configured URL ending in /authtokens is not duplicated.
+        auth_url = VAYANA_AUTH_URL if VAYANA_AUTH_URL.endswith('/authtokens') else VAYANA_AUTH_URL + '/authtokens'
         response = requests.post(
-            VAYANA_AUTH_URL + '/authtokens',
+            auth_url,
             json={
                 'handle': VAYANA_EMAIL,
                 'password': VAYANA_PASSWORD,
