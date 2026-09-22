@@ -750,8 +750,9 @@ def _perione_authenticate():
         # Auth Tokens area.
         if str(body.get('status_cd', '0')) == '1':
             raise RuntimeError(
-                'PeriOne authentication succeeded, but no bearer token was returned. '
-                'Set PERIONE_TOKEN in Render from PeriOne Auth Tokens.'
+                'PeriOne authentication endpoint returned status_cd=1 but did not issue a bearer token. '
+                'The PeriOne Swagger request is using an existing Authorization bearer token, so '
+                'Atomgrid must receive that token through the PERIONE_TOKEN Render environment variable.'
             )
         raise RuntimeError(
             'PeriOne authentication failed: ' +
