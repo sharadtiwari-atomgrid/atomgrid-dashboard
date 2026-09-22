@@ -50,19 +50,17 @@ GOOGLE_CLIENT_SECRET = os.environ.get('GOOGLE_CLIENT_SECRET', '').strip()
 GOOGLE_REDIRECT_URI = os.environ.get('GOOGLE_REDIRECT_URI', '').strip()
 SESSION_SECRET = os.environ.get('SESSION_SECRET', '').strip()
 
-# E-Way Bill tracking — PeriOne only.
-# Keep credentials/tokens in Render environment variables; never in the frontend.
-PERIONE_BASE_URL = os.environ.get('PERIONE_BASE_URL', 'https://staging.perione.in').strip().rstrip('/')
-PERIONE_EWB_PATH = os.environ.get('PERIONE_EWB_PATH', '/ewaybillapi/v1.03/ewayapi/GetEwayBill').strip()
-PERIONE_EMAIL = os.environ.get('PERIONE_EMAIL', '').strip()
+# E-Way Bill tracking — PeriOne current v1 API only.
+# Credentials stay in Render environment variables; the browser never sees them.
+PERIONE_BASE_URL = os.environ.get('PERIONE_BASE_URL', 'https://staging.perione.in/v1').strip().rstrip('/')
+PERIONE_AUTH_PATH = os.environ.get('PERIONE_AUTH_PATH', '/authenticate').strip()
+PERIONE_EWB_PATH = os.environ.get('PERIONE_EWB_PATH', '/ewaybill').strip()
 PERIONE_GSTIN = os.environ.get('PERIONE_GSTIN', '').strip().upper()
 PERIONE_USERNAME = os.environ.get('PERIONE_USERNAME', '').strip()
 PERIONE_PASSWORD = os.environ.get('PERIONE_PASSWORD', '').strip()
-PERIONE_IP_ADDRESS = os.environ.get('PERIONE_IP_ADDRESS', '').strip()
-PERIONE_CLIENT_ID = os.environ.get('PERIONE_CLIENT_ID', '').strip()
-PERIONE_CLIENT_SECRET = os.environ.get('PERIONE_CLIENT_SECRET', '').strip()
-PERIONE_TOKEN = os.environ.get('PERIONE_TOKEN', '').strip()
 PERIONE_TIMEOUT_SECONDS = int(os.environ.get('PERIONE_TIMEOUT_SECONDS', '30'))
+_perione_token = {'token': '', 'expires_at': 0}
+_perione_token_lock = threading.Lock()
 
 app.secret_key = SESSION_SECRET or secrets.token_hex(32)
 app.config.update(
@@ -175,31 +173,70 @@ DEFAULT_PUBLISHED_CSV_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vRe
 
 
 def _perione_configured():
-    required = [
-        PERIONE_EMAIL, PERIONE_GSTIN, PERIONE_USERNAME, PERIONE_PASSWORD,
-        PERIONE_IP_ADDRESS, PERIONE_CLIENT_ID, PERIONE_CLIENT_SECRET, PERIONE_TOKEN
-    ]
-    return bool(requests is not None and all(required))
+    return bool(
+        requests is not None
+        and PERIONE_GSTIN
+        and PERIONE_USERNAME
+        and PERIONE_PASSWORD
+    )
+
+
+def _perione_authenticate():
+    now = datetime.now(timezone.utc).timestamp()
+    with _perione_token_lock:
+        if _perione_token['token'] and now < _perione_token['expires_at']:
+            return _perione_token['token']
+
+        response = requests.post(
+            PERIONE_BASE_URL + PERIONE_AUTH_PATH,
+            json={
+                'gstin': PERIONE_GSTIN,
+                'username': PERIONE_USERNAME,
+                'password': PERIONE_PASSWORD,
+            },
+            headers={
+                'Content-Type': 'application/json',
+                'Accept': 'application/json',
+            },
+            timeout=PERIONE_TIMEOUT_SECONDS,
+        )
+        response.raise_for_status()
+        body = response.json()
+
+        token = body.get('token') or body.get('access_token') or (body.get('data') or {}).get('token')
+        if not token:
+            detail = body.get('message') or body.get('error') or body.get('status_desc') or body
+            raise RuntimeError(
+                'PeriOne authentication did not return a bearer token: '
+                + json.dumps(detail, ensure_ascii=False)[:500]
+            )
+
+        expires_in = body.get('expires_in') or (body.get('data') or {}).get('expires_in') or 3600
+        try:
+            expires_in = float(expires_in)
+        except (TypeError, ValueError):
+            expires_in = 3600
+
+        _perione_token.update({
+            'token': token,
+            'expires_at': now + max(300, expires_in - 60),
+        })
+        return token
 
 
 def _perione_get_details(ewb_no):
-    """Fetch one existing EWB from PeriOne. No provider fallback or generation logic."""
+    """Fetch one existing EWB through PeriOne's current v1 API."""
     if not _perione_configured():
         raise RuntimeError('PeriOne EWB tracking is not fully configured in Render.')
 
-    url = PERIONE_BASE_URL + PERIONE_EWB_PATH
-    headers = {
-        'Authorization': 'Bearer ' + PERIONE_TOKEN,
-        'Accept': 'application/json',
-        'ip_address': PERIONE_IP_ADDRESS,
-        'client_id': PERIONE_CLIENT_ID,
-        'client_secret': PERIONE_CLIENT_SECRET,
-        'gstin': PERIONE_GSTIN,
-    }
+    token = _perione_authenticate()
     response = requests.get(
-        url,
-        params={'email': PERIONE_EMAIL, 'ewbNo': ewb_no},
-        headers=headers,
+        PERIONE_BASE_URL + PERIONE_EWB_PATH + '/' + urllib.parse.quote(ewb_no, safe=''),
+        headers={
+            'Authorization': 'Bearer ' + token,
+            'Content-Type': 'application/json',
+            'Accept': 'application/json',
+        },
         timeout=PERIONE_TIMEOUT_SECONDS,
     )
     response.raise_for_status()
@@ -251,11 +288,7 @@ def _perione_normalize(body):
 
 @app.get('/api/ewaybill-provider-status')
 def ewaybill_provider_status():
-    return jsonify(
-        success=True,
-        provider='perione',
-        configured=_perione_configured(),
-    )
+    return jsonify(success=True, provider='perione', configured=_perione_configured())
 
 
 @app.get('/api/ewaybill-details')
