@@ -773,7 +773,7 @@ def _perione_get_details(ewb_no):
     }
     response = requests.get(
         url,
-        params={'ewbNo': ewb_no},
+        params={'email': PERIONE_EMAIL, 'ewbNo': ewb_no},
         headers=headers,
         timeout=PERIONE_TIMEOUT_SECONDS,
     )
