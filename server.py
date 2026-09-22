@@ -82,12 +82,16 @@ VAYANA_TIMEOUT_SECONDS = int(os.environ.get('VAYANA_TIMEOUT_SECONDS', '30'))
 # Backend-only provider selection; the frontend keeps one stable EWB endpoint.
 EWB_PROVIDER = os.environ.get('EWB_PROVIDER', 'cleartax').strip().lower()
 EWB_FALLBACK_PROVIDER = os.environ.get('EWB_FALLBACK_PROVIDER', '').strip().lower()
-PERIONE_BASE_URL = os.environ.get('PERIONE_BASE_URL', 'https://api.perione.in/v1').strip().rstrip('/')
-PERIONE_AUTH_PATH = os.environ.get('PERIONE_AUTH_PATH', '/authenticate').strip()
-PERIONE_EWB_PATH = os.environ.get('PERIONE_EWB_PATH', '/ewaybill').strip()
+PERIONE_BASE_URL = os.environ.get('PERIONE_BASE_URL', 'https://staging.perione.in').strip().rstrip('/')
+PERIONE_AUTH_PATH = os.environ.get('PERIONE_AUTH_PATH', '/ewaybillapi/v1.03/authenticate').strip()
+PERIONE_EWB_PATH = os.environ.get('PERIONE_EWB_PATH', '/ewaybillapi/v1.03/ewayapi/GetEwayBill').strip()
+PERIONE_EMAIL = os.environ.get('PERIONE_EMAIL', '').strip()
 PERIONE_GSTIN = os.environ.get('PERIONE_GSTIN', '').strip().upper()
 PERIONE_USERNAME = os.environ.get('PERIONE_USERNAME', '').strip()
 PERIONE_PASSWORD = os.environ.get('PERIONE_PASSWORD', '').strip()
+PERIONE_IP_ADDRESS = os.environ.get('PERIONE_IP_ADDRESS', '').strip()
+PERIONE_CLIENT_ID = os.environ.get('PERIONE_CLIENT_ID', '').strip()
+PERIONE_CLIENT_SECRET = os.environ.get('PERIONE_CLIENT_SECRET', '').strip()
 PERIONE_TOKEN = os.environ.get('PERIONE_TOKEN', '').strip()
 PERIONE_TIMEOUT_SECONDS = int(os.environ.get('PERIONE_TIMEOUT_SECONDS', '30'))
 _perione_token = {'token': '', 'expires_at': 0}
@@ -682,10 +686,21 @@ def _ewb_normalize(details):
 
 
 def _perione_configured():
-    return bool((PERIONE_TOKEN or (PERIONE_GSTIN and PERIONE_USERNAME and PERIONE_PASSWORD)) and requests is not None)
+    required = [
+        PERIONE_GSTIN, PERIONE_USERNAME, PERIONE_PASSWORD,
+        PERIONE_IP_ADDRESS, PERIONE_CLIENT_ID, PERIONE_CLIENT_SECRET
+    ]
+    return bool(requests is not None and all(required))
 
 
 def _perione_authenticate():
+    """Authenticate against the current PeriOne sandbox contract.
+
+    PeriOne's current Swagger sandbox uses GET /ewaybillapi/v1.03/authenticate
+    with email/username/password as query parameters and IP/client/GSTIN
+    headers. Some PeriOne environments also issue a bearer token separately;
+    PERIONE_TOKEN can be supplied through Render for that flow.
+    """
     now = datetime.now(timezone.utc).timestamp()
     with _perione_token_lock:
         if PERIONE_TOKEN:
@@ -693,35 +708,72 @@ def _perione_authenticate():
         if _perione_token['token'] and now < _perione_token['expires_at']:
             return _perione_token['token']
 
-        response = requests.post(
-            PERIONE_BASE_URL + PERIONE_AUTH_PATH,
-            json={
-                'gstin': PERIONE_GSTIN,
-                'username': PERIONE_USERNAME,
-                'password': PERIONE_PASSWORD,
-            },
-            headers={'Content-Type': 'application/json', 'Accept': 'application/json'},
-            timeout=PERIONE_TIMEOUT_SECONDS,
-        )
+        url = PERIONE_BASE_URL + PERIONE_AUTH_PATH
+        headers = {
+            'Accept': 'application/json',
+            'ip_address': PERIONE_IP_ADDRESS,
+            'client_id': PERIONE_CLIENT_ID,
+            'client_secret': PERIONE_CLIENT_SECRET,
+            'gstin': PERIONE_GSTIN,
+        }
+        params = {
+            'email': PERIONE_EMAIL,
+            'username': PERIONE_USERNAME,
+            'password': PERIONE_PASSWORD,
+        }
+        response = requests.get(url, params=params, headers=headers, timeout=PERIONE_TIMEOUT_SECONDS)
         response.raise_for_status()
         body = response.json()
-        token = body.get('token') or (body.get('data') or {}).get('token')
-        if not token:
-            raise RuntimeError('PeriOne authentication response did not contain a token.')
-        expires_in = body.get('expires_in') or (body.get('data') or {}).get('expires_in') or 3600
-        _perione_token.update({'token': token, 'expires_at': now + max(300, float(expires_in) - 60)})
-        return token
+        token = (
+            body.get('token')
+            or body.get('access_token')
+            or body.get('auth_token')
+            or (body.get('data') or {}).get('token')
+            or (body.get('data') or {}).get('access_token')
+            or (body.get('data') or {}).get('auth_token')
+        )
+        if token:
+            expires_in = (
+                body.get('expires_in')
+                or (body.get('data') or {}).get('expires_in')
+                or 3600
+            )
+            _perione_token.update({
+                'token': token,
+                'expires_at': now + max(300, float(expires_in) - 60),
+            })
+            return token
+
+        # Current PeriOne Swagger authentication can return status_cd=1
+        # without embedding the bearer token in the JSON body. In that case
+        # the token must be supplied via PERIONE_TOKEN from the PeriOne
+        # Auth Tokens area.
+        if str(body.get('status_cd', '0')) == '1':
+            raise RuntimeError(
+                'PeriOne authentication succeeded, but no bearer token was returned. '
+                'Set PERIONE_TOKEN in Render from PeriOne Auth Tokens.'
+            )
+        raise RuntimeError(
+            'PeriOne authentication failed: ' +
+            json.dumps(body.get('status_desc') or body.get('message') or body, ensure_ascii=False)
+        )
 
 
 def _perione_get_details(ewb_no):
     token = _perione_authenticate()
-    path = PERIONE_EWB_PATH.rstrip('/') + '/' + urllib.parse.quote(ewb_no, safe='')
+    url = PERIONE_BASE_URL + PERIONE_EWB_PATH
+    headers = {
+        'Authorization': 'Bearer ' + token,
+        'Accept': 'application/json',
+        'ip_address': PERIONE_IP_ADDRESS,
+        'client_id': PERIONE_CLIENT_ID,
+        'client_secret': PERIONE_CLIENT_SECRET,
+        'gstin': PERIONE_GSTIN,
+    }
     response = requests.get(
-        PERIONE_BASE_URL + path,
-        headers={
-            'Authorization': 'Bearer ' + token,
-            'Accept': 'application/json',
-        },
+        url,
+        params={'ewbNo': ewb_no},
+        headers=headers,
         timeout=PERIONE_TIMEOUT_SECONDS,
     )
     response.raise_for_status()
@@ -729,9 +781,19 @@ def _perione_get_details(ewb_no):
 
 
 def _perione_normalize(body):
-    details = body.get('data') if isinstance(body, dict) and isinstance(body.get('data'), dict) else body
-    if not isinstance(details, dict):
+    if not isinstance(body, dict):
         raise RuntimeError('PeriOne EWB response was not a JSON object.')
+
+    # Support both the documented wrapper and the NIC-style payload.
+    details = body
+    if isinstance(body.get('data'), dict):
+        details = body.get('data')
+        if isinstance(details.get('data'), dict):
+            details = details.get('data')
+
+    if not isinstance(details, dict):
+        raise RuntimeError('PeriOne EWB response did not contain EWB data.')
+
     vehicles = (
         details.get('VehiclListDetails')
         or details.get('vehicleListDetails')
@@ -745,7 +807,7 @@ def _perione_normalize(body):
     latest = vehicles[-1] if vehicles else {}
 
     def first(*keys):
-        for source in (details, latest):
+        for source in (details, latest, body):
             if not isinstance(source, dict):
                 continue
             for key in keys:
@@ -768,9 +830,8 @@ def _perione_normalize(body):
         'transporterName': first('transporterName', 'transporter_name'),
         'transporterId': first('transporterId', 'transporter_id'),
         'vehicleUpdates': vehicles,
-        'raw': details,
+        'raw': body,
     }
-
 
 def _ewb_provider_attempt(provider, ewb_no):
     """Run one provider adapter and return the dashboard's common EWB shape."""
@@ -809,6 +870,7 @@ def ewaybill_provider_status():
     statuses = {
         'cleartax': _cleartax_configured(),
         'vayana': _vayana_configured(),
+        'perione': _perione_configured(),
         'nic': _ewb_configured(),
     }
     return jsonify(
