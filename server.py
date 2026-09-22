@@ -409,9 +409,81 @@ def sheet_csv():
     return jsonify(error='Could not fetch the Google Sheet. ' + (last_error or 'Unknown error') + ' Use the published-to-web URL (ending in /pubhtml) or publish the exact tab as CSV.'), 502
 
 
+EWB_TRACKING_UI = r"""
+<style>
+#atomgrid-ewb-card{margin:20px 0;padding:22px;border:1px solid rgba(127,127,127,.22);border-radius:16px;background:rgba(127,127,127,.06)}
+#atomgrid-ewb-card h2{margin:0 0 6px;font-size:20px}
+#atomgrid-ewb-card .ewb-sub{opacity:.7;margin-bottom:16px}
+#atomgrid-ewb-form{display:flex;gap:10px;flex-wrap:wrap}
+#atomgrid-ewb-input{flex:1;min-width:240px;padding:12px 14px;border:1px solid rgba(127,127,127,.35);border-radius:10px;font-size:15px;background:transparent}
+#atomgrid-ewb-btn{padding:12px 18px;border:0;border-radius:10px;cursor:pointer;font-weight:600}
+#atomgrid-ewb-msg{margin-top:12px;font-size:13px}
+#atomgrid-ewb-result{display:none;margin-top:16px;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px}
+.ewb-field{padding:12px;border-radius:10px;background:rgba(127,127,127,.08)}
+.ewb-field small{display:block;opacity:.6;margin-bottom:4px}.ewb-field strong{display:block;word-break:break-word}
+</style>
+<section id="atomgrid-ewb-card">
+  <h2>E-Way Bill Tracking</h2>
+  <div class="ewb-sub">Enter an existing 12-digit E-Way Bill number to retrieve its latest PeriOne details.</div>
+  <form id="atomgrid-ewb-form">
+    <input id="atomgrid-ewb-input" inputmode="numeric" maxlength="12" placeholder="Enter E-Way Bill number" autocomplete="off">
+    <button id="atomgrid-ewb-btn" type="submit">Track EWB</button>
+  </form>
+  <div id="atomgrid-ewb-msg"></div>
+  <div id="atomgrid-ewb-result">
+    <div class="ewb-field"><small>Status</small><strong data-ewb="status">—</strong></div>
+    <div class="ewb-field"><small>Vehicle</small><strong data-ewb="vehicleNo">—</strong></div>
+    <div class="ewb-field"><small>From</small><strong data-ewb="fromPlace">—</strong></div>
+    <div class="ewb-field"><small>To</small><strong data-ewb="toPlace">—</strong></div>
+    <div class="ewb-field"><small>Distance</small><strong data-ewb="actualDist">—</strong></div>
+    <div class="ewb-field"><small>Validity</small><strong data-ewb="validUpto">—</strong></div>
+    <div class="ewb-field"><small>Transporter</small><strong data-ewb="transporterName">—</strong></div>
+    <div class="ewb-field"><small>Last Updated</small><strong data-ewb="lastUpdated">—</strong></div>
+  </div>
+</section>
+<script>
+(function(){
+  const form=document.getElementById('atomgrid-ewb-form');
+  if(!form)return;
+  const input=document.getElementById('atomgrid-ewb-input');
+  const btn=document.getElementById('atomgrid-ewb-btn');
+  const msg=document.getElementById('atomgrid-ewb-msg');
+  const result=document.getElementById('atomgrid-ewb-result');
+  form.addEventListener('submit',async function(e){
+    e.preventDefault();
+    const ewb=(input.value||'').replace(/\D/g,'');
+    result.style.display='none';
+    if(ewb.length!==12){msg.textContent='Enter a valid 12-digit E-Way Bill number.';return;}
+    btn.disabled=true; msg.textContent='Fetching E-Way Bill details…';
+    try{
+      const res=await fetch('/api/ewaybill-details?ewb_no='+encodeURIComponent(ewb),{credentials:'same-origin',headers:{'Accept':'application/json'}});
+      const body=await res.json().catch(()=>({}));
+      if(!res.ok||!body.success){
+        const detail=body.detail?(' — '+body.detail):'';
+        throw new Error((body.error||('Request failed (HTTP '+res.status+')'))+detail);
+      }
+      document.querySelectorAll('[data-ewb]').forEach(el=>{
+        const v=body[el.dataset.ewb];
+        el.textContent=(v===null||v===undefined||v==='')?'—':String(v);
+      });
+      result.style.display='grid';
+      msg.textContent='E-Way Bill details updated.';
+    }catch(err){
+      msg.textContent=err.message||'E-Way Bill lookup failed.';
+    }finally{btn.disabled=false;}
+  });
+})();
+</script>
+"""
+
 @app.get('/')
 def index():
-    return send_from_directory(BASE_DIR, 'index.html')
+    path = os.path.join(BASE_DIR, 'index.html')
+    with open(path, 'r', encoding='utf-8') as fh:
+        html = fh.read()
+    if 'atomgrid-ewb-card' not in html:
+        html = html.replace('</body>', EWB_TRACKING_UI + '</body>')
+    return Response(html, mimetype='text/html')
 
 
 @app.get('/transporter-finder')
