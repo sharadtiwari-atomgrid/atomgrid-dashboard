@@ -897,8 +897,31 @@ def ewaybill_details():
         except requests.HTTPError as exc:
             response = exc.response
             status = response.status_code if response is not None else 502
-            attempts.append({'provider': provider, 'status': status, 'error': 'HTTP ' + str(status)})
-            app.logger.warning('EWB provider %s failed for %s with HTTP %s', provider, ewb_no, status)
+            detail = ''
+            if response is not None:
+                try:
+                    payload = response.json()
+                    if isinstance(payload, dict):
+                        detail = (
+                            payload.get('message')
+                            or payload.get('status_desc')
+                            or payload.get('error')
+                            or payload.get('error_message')
+                            or payload.get('errorDetails')
+                            or ''
+                        )
+                    elif isinstance(payload, str):
+                        detail = payload
+                except ValueError:
+                    detail = (response.text or '').strip()[:500]
+            attempt = {'provider': provider, 'status': status, 'error': 'HTTP ' + str(status)}
+            if detail:
+                attempt['detail'] = str(detail)[:500]
+            attempts.append(attempt)
+            app.logger.warning(
+                'EWB provider %s failed for %s with HTTP %s%s',
+                provider, ewb_no, status, ': ' + str(detail)[:500] if detail else ''
+            )
         except Exception as exc:
             attempts.append({'provider': provider, 'error': str(exc)})
             app.logger.warning('EWB provider %s failed for %s: %s', provider, ewb_no, exc)
