@@ -482,7 +482,12 @@ def index():
     with open(path, 'r', encoding='utf-8') as fh:
         html = fh.read()
     if 'atomgrid-ewb-card' not in html:
-        html = html.replace('</body>', EWB_TRACKING_UI + '</body>')
+        marker = '</body>'
+        pos = html.lower().rfind(marker)
+        if pos >= 0:
+            html = html[:pos] + EWB_TRACKING_UI + html[pos:]
+        else:
+            html += EWB_TRACKING_UI
     return Response(html, mimetype='text/html')
 
 
